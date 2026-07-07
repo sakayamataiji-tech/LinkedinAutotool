@@ -121,6 +121,13 @@ LINKEDIN_DRY_RUN="true"                          # まずはドライラン推�
 - `/api/cron/run` は `Authorization: Bearer <CRON_SECRET>` または `?secret=` を要求（未設定時は開放）。
 - `?force=1` で稼働時間を無視して即実行。設定画面の「今すぐ全キャンペーンを実行」も同様。
 
+### 並行実行の安全性（二重処理防止）
+
+エンジンはリードを処理する前に **`SELECT … FOR UPDATE SKIP LOCKED`** でアトミックに確保
+（`CampaignLead.lockedAt` を刻む）します。これにより **複数のワーカー/インスタンスを同時に動かしても
+同じリードを二重処理（＝二重送信）しません**。クラッシュ等で放置されたロックは TTL（5分）経過後に
+自動で再取得可能になります。将来キュー＋ワーカーへ増強する際、この排他制御がそのまま効きます。
+
 ## Webhook
 
 イベント発生時に登録済みWebhookへ署名付きでPOSTします（`src/lib/webhooks.ts`）。

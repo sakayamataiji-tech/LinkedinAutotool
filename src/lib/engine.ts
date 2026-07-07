@@ -1,4 +1,5 @@
-import type { ActionType, Prisma, SequenceNode } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { ActionType, SequenceNode } from "@prisma/client";
 import { prisma } from "./prisma";
 import { getProvider, type LeadContext } from "./linkedin";
 import { renderTemplate } from "./text";
@@ -380,10 +381,56 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
   return { campaignLeadId, processed: true, reason: result.detail };
 }
 
+// A lock is considered stale (reclaimable) after this long — protects against
+// a worker that crashed mid-processing without releasing its claim.
+const LOCK_TTL_MINUTES = 5;
+
+/**
+ * Atomically claim up to `limit` due campaign leads so no two workers ever
+ * process the same lead. Uses `FOR UPDATE SKIP LOCKED`: concurrent claimers
+ * skip rows another transaction is selecting, and the outer UPDATE stamps
+ * `lockedAt` so already-claimed rows are excluded until released or stale.
+ */
+async function claimDueLeads(opts: {
+  teamId: string;
+  campaignId?: string;
+  limit: number;
+}): Promise<string[]> {
+  const { teamId, campaignId, limit } = opts;
+  const selector = campaignId
+    ? Prisma.sql`cl."campaignId" = ${campaignId}`
+    : Prisma.sql`cl."campaignId" IN (SELECT id FROM "Campaign" WHERE "teamId" = ${teamId} AND status = 'RUNNING')`;
+
+  const rows = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+    UPDATE "CampaignLead" AS target
+    SET "lockedAt" = now()
+    WHERE target.id IN (
+      SELECT cl.id FROM "CampaignLead" cl
+      WHERE ${selector}
+        AND cl.status IN ('PENDING', 'IN_PROGRESS')
+        AND (cl."nextRunAt" IS NULL OR cl."nextRunAt" <= now())
+        AND (cl."lockedAt" IS NULL OR cl."lockedAt" < now() - interval '${Prisma.raw(String(LOCK_TTL_MINUTES))} minutes')
+      ORDER BY cl."nextRunAt" ASC NULLS FIRST
+      FOR UPDATE SKIP LOCKED
+      LIMIT ${limit}
+    )
+    RETURNING target.id;
+  `);
+  return rows.map((r) => r.id);
+}
+
+async function releaseLead(id: string): Promise<void> {
+  await prisma.campaignLead
+    .update({ where: { id }, data: { lockedAt: null } })
+    .catch(() => {});
+}
+
 /**
  * Process all campaign leads that are due to run for a campaign (or all running
- * campaigns for a team). Loops each lead forward until it hits a delay,
- * condition wait, limit, or completion — bounded to avoid infinite loops.
+ * campaigns for a team). Each lead is claimed with a row lock first, so this is
+ * safe to run from multiple concurrent workers. Loops each lead forward until
+ * it hits a delay, condition wait, limit, or completion — bounded to avoid
+ * infinite loops — then releases the claim.
  */
 export async function runDueSteps(opts: {
   teamId: string;
@@ -392,43 +439,35 @@ export async function runDueSteps(opts: {
 }): Promise<{ processed: number; outcomes: StepOutcome[] }> {
   const { teamId, campaignId, maxPerLead = 20 } = opts;
 
-  const campaignFilter: Prisma.CampaignLeadWhereInput = campaignId
-    ? { campaignId }
-    : { campaign: { teamId, status: "RUNNING" } };
-
-  const due = await prisma.campaignLead.findMany({
-    where: {
-      ...campaignFilter,
-      status: { in: ["PENDING", "IN_PROGRESS"] },
-      OR: [{ nextRunAt: null }, { nextRunAt: { lte: new Date() } }],
-    },
-    select: { id: true },
-    take: 500,
-  });
+  const claimed = await claimDueLeads({ teamId, campaignId, limit: 500 });
 
   const outcomes: StepOutcome[] = [];
   let processed = 0;
 
-  for (const { id } of due) {
-    for (let i = 0; i < maxPerLead; i++) {
-      const outcome = await stepCampaignLead(id);
-      if (!outcome.processed) {
-        outcomes.push(outcome);
-        break;
+  for (const id of claimed) {
+    try {
+      for (let i = 0; i < maxPerLead; i++) {
+        const outcome = await stepCampaignLead(id);
+        if (!outcome.processed) {
+          outcomes.push(outcome);
+          break;
+        }
+        processed++;
+        // Stop looping this lead once it is parked on a future delay.
+        const refreshed = await prisma.campaignLead.findUnique({
+          where: { id },
+          select: { status: true, nextRunAt: true },
+        });
+        if (
+          !refreshed ||
+          refreshed.status !== "IN_PROGRESS" ||
+          (refreshed.nextRunAt && refreshed.nextRunAt.getTime() > Date.now())
+        ) {
+          break;
+        }
       }
-      processed++;
-      // Stop looping this lead once it is parked on a future delay.
-      const refreshed = await prisma.campaignLead.findUnique({
-        where: { id },
-        select: { status: true, nextRunAt: true },
-      });
-      if (
-        !refreshed ||
-        refreshed.status !== "IN_PROGRESS" ||
-        (refreshed.nextRunAt && refreshed.nextRunAt.getTime() > Date.now())
-      ) {
-        break;
-      }
+    } finally {
+      await releaseLead(id);
     }
   }
 

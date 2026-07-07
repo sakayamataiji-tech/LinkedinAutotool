@@ -332,6 +332,11 @@ model CampaignLead {
   connectionAccepted Boolean @default(false)
   replied            Boolean @default(false)
 
+  // Claim lock: set when a worker is processing this lead. Concurrent workers
+  // skip locked rows (SELECT ... FOR UPDATE SKIP LOCKED); stale locks past the
+  // TTL are reclaimable so a crashed worker doesn't strand a lead.
+  lockedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -340,6 +345,7 @@ model CampaignLead {
   @@unique([campaignId, leadId])
   @@index([status])
   @@index([nextRunAt])
+  @@index([lockedAt])
 }
 
 // Rolled-up daily metrics per campaign (日次推移のグラフ表示)
