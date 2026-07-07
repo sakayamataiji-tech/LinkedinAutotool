@@ -127,13 +127,34 @@ function toLeadContext(lead: {
   };
 }
 
-function nextByOrder(nodes: SequenceNode[], current: SequenceNode): SequenceNode | null {
+/** Stable hash of a string to [0,1). */
+function hashFraction(seed: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 100000) / 100000;
+}
+
+/** Weighted deterministic variant selection for A/B testing. */
+function pickVariant<T extends { weight: number }>(variants: T[], seed: string): T {
+  const total = variants.reduce((s, v) => s + Math.max(1, v.weight), 0);
+  let r = hashFraction(seed) * total;
+  for (const v of variants) {
+    r -= Math.max(1, v.weight);
+    if (r < 0) return v;
+  }
+  return variants[variants.length - 1];
+}
+
+function nextByOrder<T extends SequenceNode>(nodes: T[], current: T): T | null {
   const sorted = [...nodes].sort((a, b) => a.order - b.order);
   const idx = sorted.findIndex((n) => n.id === current.id);
   return sorted[idx + 1] ?? null;
 }
 
-function nodeById(nodes: SequenceNode[], id: string | null): SequenceNode | null {
+function nodeById<T extends SequenceNode>(nodes: T[], id: string | null): T | null {
   if (!id) return null;
   return nodes.find((n) => n.id === id) ?? null;
 }
@@ -153,7 +174,9 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
     where: { id: campaignLeadId },
     include: {
       lead: true,
-      campaign: { include: { sequence: { include: { nodes: true } } } },
+      campaign: {
+        include: { sequence: { include: { nodes: { include: { variants: true } } } } },
+      },
     },
   });
 
@@ -250,8 +273,22 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
     return { campaignLeadId, processed: false, reason: "daily_limit" };
   }
 
-  const body = current.messageBody
-    ? renderTemplate(current.messageBody, {
+  // A/B testing: when a message node has variants, assign this lead one
+  // deterministically (stable per lead+node), and send that variant's body.
+  const isMessageAction =
+    actionType === "MESSAGE" || actionType === "INMAIL" || actionType === "SEND_EMAIL";
+  let rawBody = current.messageBody;
+  let rawSubject = current.messageSubject;
+  let chosenVariantId: string | null = null;
+  if (isMessageAction && current.variants && current.variants.length > 0) {
+    const variant = pickVariant(current.variants, cl.leadId + current.id);
+    chosenVariantId = variant.id;
+    rawBody = variant.body;
+    rawSubject = variant.subject;
+  }
+
+  const body = rawBody
+    ? renderTemplate(rawBody, {
         firstName: cl.lead.firstName,
         lastName: cl.lead.lastName,
         company: cl.lead.company,
@@ -263,7 +300,7 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
     actionType,
     lead: toLeadContext(cl.lead),
     body,
-    subject: current.messageSubject ?? undefined,
+    subject: rawSubject ?? undefined,
   });
 
   // Persist lead-side effects.
@@ -298,6 +335,7 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
         conversationId: convo.id,
         direction: "OUTBOUND",
         body: result.message.body,
+        variantId: chosenVariantId,
       },
     });
   }

@@ -9,6 +9,8 @@ import {
   ACTION_LABELS,
   CONDITION_LABELS,
 } from "@/components/SequenceBuilder";
+import { VariantManager } from "@/components/VariantManager";
+import { sequenceVariantStats } from "@/lib/ab";
 
 export const dynamic = "force-dynamic";
 
@@ -39,9 +41,19 @@ export default async function SequenceBuilderPage({ params }: { params: Promise<
 
   const sequence = await prisma.sequence.findFirst({
     where: { id, teamId },
-    include: { nodes: { orderBy: { order: "asc" } }, campaign: true },
+    include: {
+      nodes: { orderBy: { order: "asc" }, include: { variants: { orderBy: { label: "asc" } } } },
+      campaign: true,
+    },
   });
   if (!sequence) notFound();
+
+  const [templates, abStats] = await Promise.all([
+    prisma.messageTemplate.findMany({ where: { teamId }, orderBy: { name: "asc" } }),
+    sequenceVariantStats(sequence.id),
+  ]);
+  const statsByNode = new Map(abStats.map((s) => [s.nodeId, s.variants]));
+  const MESSAGE_ACTIONS = new Set(["MESSAGE", "INMAIL", "SEND_EMAIL"]);
 
   return (
     <div>
@@ -79,7 +91,7 @@ export default async function SequenceBuilderPage({ params }: { params: Promise<
                             <div className="text-sm font-medium text-slate-800">
                               {i + 1}. {nodeTitle(node)}
                             </div>
-                            {node.messageBody ? (
+                            {node.messageBody && node.variants.length === 0 ? (
                               <p className="mt-1 whitespace-pre-wrap text-xs text-slate-500">
                                 {node.messageBody}
                               </p>
@@ -88,6 +100,21 @@ export default async function SequenceBuilderPage({ params }: { params: Promise<
                         </div>
                         <DeleteNodeButton nodeId={node.id} sequenceId={sequence.id} />
                       </div>
+                      {node.kind === "ACTION" && MESSAGE_ACTIONS.has(node.actionType ?? "") ? (
+                        <VariantManager
+                          nodeId={node.id}
+                          variants={(statsByNode.get(node.id) ?? []).map((v) => ({
+                            id: v.id,
+                            label: v.label,
+                            body: v.body,
+                            subject: v.subject,
+                            sent: v.sent,
+                            recipients: v.recipients,
+                            replied: v.replied,
+                            replyRate: v.replyRate,
+                          }))}
+                        />
+                      ) : null}
                     </Card>
                     {i < sequence.nodes.length - 1 ? (
                       <div className="ml-[27px] h-6 w-px bg-slate-200" />
@@ -102,7 +129,18 @@ export default async function SequenceBuilderPage({ params }: { params: Promise<
         <div>
           <Card className="p-5">
             <h2 className="mb-4 text-sm font-semibold text-slate-700">ステップを追加</h2>
-            <AddNodeForm sequenceId={sequence.id} />
+            <AddNodeForm
+              sequenceId={sequence.id}
+              templates={templates.map((t) => ({
+                id: t.id,
+                name: t.name,
+                subject: t.subject,
+                body: t.body,
+              }))}
+            />
+            <p className="mt-3 text-xs text-slate-400">
+              メッセージ系ステップは追加後、A/Bテストのバリアントを設定できます。
+            </p>
           </Card>
         </div>
       </div>

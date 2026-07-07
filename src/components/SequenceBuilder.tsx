@@ -25,9 +25,24 @@ export const CONDITION_LABELS: Record<string, string> = {
 
 const MESSAGE_ACTIONS = new Set(["MESSAGE", "INMAIL", "SEND_EMAIL"]);
 
-export function AddNodeForm({ sequenceId }: { sequenceId: string }) {
+export interface TemplateOption {
+  id: string;
+  name: string;
+  subject: string | null;
+  body: string;
+}
+
+export function AddNodeForm({
+  sequenceId,
+  templates = [],
+}: {
+  sequenceId: string;
+  templates?: TemplateOption[];
+}) {
   const [kind, setKind] = useState<"ACTION" | "DELAY" | "CONDITION">("ACTION");
   const [actionType, setActionType] = useState("CONNECT_REQUEST");
+  const [body, setBody] = useState("");
+  const [subject, setSubject] = useState("");
   const [pending, start] = useTransition();
 
   return (
@@ -69,10 +84,38 @@ export function AddNodeForm({ sequenceId }: { sequenceId: string }) {
           </div>
           {MESSAGE_ACTIONS.has(actionType) ? (
             <>
+              {templates.length > 0 ? (
+                <div>
+                  <label className="label">テンプレートから挿入</label>
+                  <select
+                    className="input"
+                    defaultValue=""
+                    onChange={(e) => {
+                      const t = templates.find((x) => x.id === e.target.value);
+                      if (t) {
+                        setBody(t.body);
+                        if (t.subject) setSubject(t.subject);
+                      }
+                    }}
+                  >
+                    <option value="">選択して挿入…</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
               {actionType !== "MESSAGE" ? (
                 <div>
                   <label className="label">件名</label>
-                  <input name="messageSubject" className="input" />
+                  <input
+                    name="messageSubject"
+                    className="input"
+                    value={subject}
+                    onChange={(e) => setSubject(e.target.value)}
+                  />
                 </div>
               ) : null}
               <div>
@@ -81,6 +124,8 @@ export function AddNodeForm({ sequenceId }: { sequenceId: string }) {
                   name="messageBody"
                   className="input min-h-[80px]"
                   placeholder="はじめまして {{firstName}} さん、"
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
                 />
               </div>
             </>

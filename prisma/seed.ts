@@ -16,6 +16,8 @@ async function main() {
   await prisma.activityLog.deleteMany();
   await prisma.campaignLead.deleteMany();
   await prisma.campaignDailyStat.deleteMany();
+  await prisma.messageVariant.deleteMany();
+  await prisma.messageTemplate.deleteMany();
   await prisma.sequenceNode.deleteMany();
   await prisma.campaign.deleteMany();
   await prisma.sequence.deleteMany();
@@ -181,9 +183,10 @@ async function main() {
     },
   ];
 
+  let firstMessageNodeId: string | null = null;
   for (let i = 0; i < nodeDefs.length; i++) {
     const d = nodeDefs[i];
-    await prisma.sequenceNode.create({
+    const node = await prisma.sequenceNode.create({
       data: {
         sequenceId: sequence.id,
         kind: d.kind,
@@ -195,7 +198,53 @@ async function main() {
         conditionType: d.conditionType ?? null,
       },
     });
+    if (d.kind === "ACTION" && d.actionType === "MESSAGE" && !firstMessageNodeId) {
+      firstMessageNodeId = node.id;
+    }
   }
+
+  // A/B test on the first outreach message (two subject/tone variants).
+  if (firstMessageNodeId) {
+    await prisma.messageVariant.createMany({
+      data: [
+        {
+          nodeId: firstMessageNodeId,
+          label: "A",
+          body: "{{firstName}} さん、接続ありがとうございます！{{company}} での {{jobTitle}} のお取り組みに関心があり連絡しました。少しお話しできればと思います。",
+        },
+        {
+          nodeId: firstMessageNodeId,
+          label: "B",
+          body: "{{firstName}} さん、はじめまして。{{company}} の {{jobTitle}} として注力されている領域について、ぜひ一度意見交換させていただけませんか？",
+        },
+      ],
+    });
+  }
+
+  // Message templates library
+  await prisma.messageTemplate.createMany({
+    data: [
+      {
+        teamId: team.id,
+        name: "初回接続メッセージ",
+        category: "message",
+        body: "{{firstName}} さん、接続ありがとうございます！{{company}} でのお取り組みに関心があります。",
+      },
+      {
+        teamId: team.id,
+        name: "フォローアップ",
+        category: "message",
+        body: "{{firstName}} さん、先日のメッセージのフォローアップです。ご都合いかがでしょうか？",
+      },
+      {
+        teamId: team.id,
+        name: "採用スカウト InMail",
+        category: "inmail",
+        subject: "{{company}} でのご活躍について",
+        body: "{{firstName}} さん、{{jobTitle}} としてのご経験に大変興味を持ちご連絡しました。",
+      },
+    ],
+  });
 
   // Template sequence
   await prisma.sequence.create({

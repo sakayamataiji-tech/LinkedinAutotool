@@ -30,6 +30,22 @@ model Team {
   webhooks    Webhook[]
   limits      DailyLimit?
   activities  ActivityLog[] @relation("teamActivities")
+  templates   MessageTemplate[]
+}
+
+// Reusable message template library (メッセージテンプレート管理).
+model MessageTemplate {
+  id        String   @id @default(cuid())
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId    String
+  name      String
+  category  String   @default("message") // message | inmail | email
+  subject   String?
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([teamId])
 }
 
 model User {
@@ -238,7 +254,26 @@ model SequenceNode {
   posX Float @default(0)
   posY Float @default(0)
 
+  variants MessageVariant[]
+
   @@index([sequenceId])
+}
+
+// A/B test variant for a message node. When a node has variants, each lead is
+// assigned one deterministically (weighted) and the variant's body is sent.
+model MessageVariant {
+  id        String   @id @default(cuid())
+  node      SequenceNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  nodeId    String
+  label     String // "A", "B", ...
+  subject   String?
+  body      String
+  weight    Int      @default(1)
+  createdAt DateTime @default(now())
+
+  messages Message[]
+
+  @@index([nodeId])
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +396,12 @@ model Message {
   seen           Boolean          @default(false) // whether the recipient has seen it
   sentAt         DateTime         @default(now())
 
+  // A/B test attribution: which variant produced this outbound message.
+  variant   MessageVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  variantId String?
+
   @@index([conversationId])
+  @@index([variantId])
 }
 
 // ---------------------------------------------------------------------------

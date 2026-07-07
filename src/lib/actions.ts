@@ -101,6 +101,104 @@ export async function deleteSequenceNode(nodeId: string, sequenceId: string) {
   revalidatePath(`/sequences/${sequenceId}`);
 }
 
+// --- Message templates -----------------------------------------------------
+
+export async function createTemplate(formData: FormData) {
+  const teamId = await getCurrentTeamId();
+  const name = String(formData.get("name") ?? "").trim();
+  const body = String(formData.get("body") ?? "").trim();
+  const category = String(formData.get("category") ?? "message");
+  const subject = String(formData.get("subject") ?? "").trim() || null;
+  if (!name || !body) return;
+  await prisma.messageTemplate.create({ data: { teamId, name, body, category, subject } });
+  revalidatePath("/templates");
+}
+
+export async function updateTemplate(id: string, formData: FormData) {
+  const teamId = await getCurrentTeamId();
+  const tpl = await prisma.messageTemplate.findFirst({ where: { id, teamId } });
+  if (!tpl) return;
+  await prisma.messageTemplate.update({
+    where: { id },
+    data: {
+      name: String(formData.get("name") ?? tpl.name).trim() || tpl.name,
+      body: String(formData.get("body") ?? tpl.body),
+      subject: String(formData.get("subject") ?? "").trim() || null,
+      category: String(formData.get("category") ?? tpl.category),
+    },
+  });
+  revalidatePath("/templates");
+}
+
+export async function deleteTemplate(id: string) {
+  const teamId = await getCurrentTeamId();
+  const tpl = await prisma.messageTemplate.findFirst({ where: { id, teamId } });
+  if (!tpl) return;
+  await prisma.messageTemplate.delete({ where: { id } });
+  revalidatePath("/templates");
+}
+
+// --- A/B variants ----------------------------------------------------------
+
+const VARIANT_LABELS = ["A", "B", "C", "D", "E", "F"];
+
+/** Turn a single-body message node into an A/B test (seeds variants A & B). */
+export async function enableAbTest(nodeId: string) {
+  const teamId = await getCurrentTeamId();
+  const node = await prisma.sequenceNode.findFirst({
+    where: { id: nodeId, sequence: { teamId } },
+    include: { variants: true },
+  });
+  if (!node || node.variants.length > 0) return;
+  const base = node.messageBody ?? "";
+  await prisma.messageVariant.createMany({
+    data: [
+      { nodeId, label: "A", body: base, subject: node.messageSubject },
+      { nodeId, label: "B", body: base, subject: node.messageSubject },
+    ],
+  });
+  revalidatePath(`/sequences/${node.sequenceId}`);
+}
+
+export async function addVariant(nodeId: string) {
+  const teamId = await getCurrentTeamId();
+  const node = await prisma.sequenceNode.findFirst({
+    where: { id: nodeId, sequence: { teamId } },
+    include: { variants: true },
+  });
+  if (!node) return;
+  const label = VARIANT_LABELS[node.variants.length] ?? `V${node.variants.length + 1}`;
+  await prisma.messageVariant.create({
+    data: { nodeId, label, body: node.messageBody ?? "" },
+  });
+  revalidatePath(`/sequences/${node.sequenceId}`);
+}
+
+export async function updateVariant(variantId: string, body: string, subject: string) {
+  const teamId = await getCurrentTeamId();
+  const variant = await prisma.messageVariant.findFirst({
+    where: { id: variantId, node: { sequence: { teamId } } },
+    include: { node: true },
+  });
+  if (!variant) return;
+  await prisma.messageVariant.update({
+    where: { id: variantId },
+    data: { body, subject: subject.trim() || null },
+  });
+  revalidatePath(`/sequences/${variant.node.sequenceId}`);
+}
+
+export async function deleteVariant(variantId: string) {
+  const teamId = await getCurrentTeamId();
+  const variant = await prisma.messageVariant.findFirst({
+    where: { id: variantId, node: { sequence: { teamId } } },
+    include: { node: true },
+  });
+  if (!variant) return;
+  await prisma.messageVariant.delete({ where: { id: variantId } });
+  revalidatePath(`/sequences/${variant.node.sequenceId}`);
+}
+
 // --- Leads -----------------------------------------------------------------
 
 export async function createLead(formData: FormData) {

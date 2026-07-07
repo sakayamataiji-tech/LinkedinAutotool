@@ -8,6 +8,7 @@ const NAV = [
   { href: "/campaigns", label: "キャンペーン", icon: "◎" },
   { href: "/leads", label: "リード管理", icon: "☰" },
   { href: "/sequences", label: "シーケンス", icon: "⇄" },
+  { href: "/templates", label: "テンプレート", icon: "▤" },
   { href: "/inbox", label: "受信箱", icon: "✉" },
   { href: "/settings", label: "設定", icon: "⚙" },
 ];
