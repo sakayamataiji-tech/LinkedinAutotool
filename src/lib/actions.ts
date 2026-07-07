@@ -239,12 +239,39 @@ export async function runSchedulerNow() {
 
 export async function createWebhook(formData: FormData) {
   const teamId = await getCurrentTeamId();
+  const { generateWebhookSecret } = await import("./webhooks");
   const url = String(formData.get("url") ?? "").trim();
-  const events = String(formData.get("events") ?? "")
-    .split(",")
-    .map((e) => e.trim())
-    .filter(Boolean);
+  // Subscribed events come from checkboxes (empty selection = all events).
+  const events = formData.getAll("events").map(String).filter(Boolean);
   if (!url) return;
-  await prisma.webhook.create({ data: { teamId, url, events } });
+  await prisma.webhook.create({
+    data: { teamId, url, events, secret: generateWebhookSecret() },
+  });
   revalidatePath("/settings");
+}
+
+async function assertOwnWebhook(webhookId: string): Promise<boolean> {
+  const teamId = await getCurrentTeamId();
+  const wh = await prisma.webhook.findFirst({ where: { id: webhookId, teamId } });
+  return Boolean(wh);
+}
+
+export async function deleteWebhook(webhookId: string) {
+  if (!(await assertOwnWebhook(webhookId))) return;
+  await prisma.webhook.delete({ where: { id: webhookId } });
+  revalidatePath("/settings");
+}
+
+export async function toggleWebhook(webhookId: string, active: boolean) {
+  if (!(await assertOwnWebhook(webhookId))) return;
+  await prisma.webhook.update({ where: { id: webhookId }, data: { active } });
+  revalidatePath("/settings");
+}
+
+export async function testWebhook(webhookId: string): Promise<boolean> {
+  if (!(await assertOwnWebhook(webhookId))) return false;
+  const { sendTestWebhook } = await import("./webhooks");
+  const ok = await sendTestWebhook(webhookId);
+  revalidatePath("/settings");
+  return ok;
 }

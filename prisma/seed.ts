@@ -10,6 +10,7 @@ async function main() {
 
   // Clean slate (dev only)
   await prisma.session.deleteMany();
+  await prisma.webhookDelivery.deleteMany();
   await prisma.message.deleteMany();
   await prisma.conversation.deleteMany();
   await prisma.activityLog.deleteMany();
@@ -245,6 +246,7 @@ async function main() {
       teamId: team.id,
       url: "https://hooks.example.com/linkedin",
       events: ["connection.accepted", "message.replied"],
+      secret: "whsec_demo000000000000000000000000000000000000",
     },
   });
 

@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { getProvider, type LeadContext } from "./linkedin";
+import { dispatchWebhookEvent } from "./webhooks";
 
 /**
  * Reply detection + auto-pause.
@@ -63,6 +64,22 @@ export async function recordInboundReply(
   });
 
   const paused = await handleReplyDetected(leadId);
+
+  const lead = await prisma.lead.findUnique({
+    where: { id: leadId },
+    select: { teamId: true, firstName: true, lastName: true, company: true, email: true },
+  });
+  if (lead) {
+    await dispatchWebhookEvent(lead.teamId, "message.replied", {
+      leadId,
+      name: `${lead.firstName} ${lead.lastName}`.trim(),
+      company: lead.company,
+      email: lead.email,
+      body,
+      pausedCampaigns: paused,
+    });
+  }
+
   return { paused };
 }
 

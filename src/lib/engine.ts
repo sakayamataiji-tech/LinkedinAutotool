@@ -2,6 +2,22 @@ import type { ActionType, Prisma, SequenceNode } from "@prisma/client";
 import { prisma } from "./prisma";
 import { getProvider, type LeadContext } from "./linkedin";
 import { renderTemplate } from "./text";
+import { dispatchWebhookEvent } from "./webhooks";
+
+/** Compact lead payload included in webhook events. */
+function leadEventPayload(cl: {
+  campaignId: string;
+  leadId: string;
+  lead: { firstName: string; lastName: string; company: string | null; email: string | null };
+}) {
+  return {
+    campaignId: cl.campaignId,
+    leadId: cl.leadId,
+    name: `${cl.lead.firstName} ${cl.lead.lastName}`.trim(),
+    company: cl.lead.company,
+    email: cl.lead.email,
+  };
+}
 
 /**
  * Sequence execution engine.
@@ -192,6 +208,7 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
         nextRunAt: next ? new Date(Date.now() + minutes * 60_000) : null,
       },
     });
+    if (!next) await dispatchWebhookEvent(teamId, "campaignLead.completed", leadEventPayload(cl));
     return { campaignLeadId, processed: true, reason: `delay_${minutes}m` };
   }
 
@@ -222,6 +239,7 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
         nextRunAt: null,
       },
     });
+    if (!next) await dispatchWebhookEvent(teamId, "campaignLead.completed", leadEventPayload(cl));
     return { campaignLeadId, processed: true, reason: `condition_${result}` };
   }
 
@@ -300,6 +318,7 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
     actionType === "CONNECT_REQUEST" && result.patch?.isConnected === true;
 
   const next = nextByOrder(nodes, current);
+  const completed = result.ok && !next;
   await prisma.campaignLead.update({
     where: { id: cl.id },
     data: {
@@ -309,6 +328,16 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
       ...(connectionAccepted ? { connectionAccepted: true } : {}),
     },
   });
+
+  // Fire webhooks for the events this action produced.
+  const payload = leadEventPayload(cl);
+  if (connectionAccepted) await dispatchWebhookEvent(teamId, "connection.accepted", payload);
+  if (result.message && result.ok)
+    await dispatchWebhookEvent(teamId, "message.sent", {
+      ...payload,
+      channel: result.message.channel,
+    });
+  if (completed) await dispatchWebhookEvent(teamId, "campaignLead.completed", payload);
 
   return { campaignLeadId, processed: true, reason: result.detail };
 }

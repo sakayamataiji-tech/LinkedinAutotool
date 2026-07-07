@@ -1,8 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { getCurrentTeamId } from "@/lib/session";
-import { updateDailyLimits, createWebhook } from "@/lib/actions";
+import { updateDailyLimits } from "@/lib/actions";
 import { inviteMemberAction } from "@/lib/auth/actions";
 import { WorkingHoursEditor, RunNowButton } from "@/components/SchedulerControls";
+import { WebhookManager } from "@/components/WebhookManager";
 import { isWithinWorkingHours } from "@/lib/schedule";
 import { Card, PageHeader } from "@/components/ui";
 
@@ -32,7 +33,11 @@ export default async function SettingsPage() {
   const [limits, connections, webhooks, members] = await Promise.all([
     prisma.dailyLimit.findUnique({ where: { teamId } }),
     prisma.accountConnection.findMany({ where: { teamId } }),
-    prisma.webhook.findMany({ where: { teamId } }),
+    prisma.webhook.findMany({
+      where: { teamId },
+      orderBy: { createdAt: "desc" },
+      include: { deliveries: { orderBy: { createdAt: "desc" }, take: 5 } },
+    }),
     prisma.membership.findMany({
       where: { teamId },
       include: { user: true },
@@ -114,29 +119,24 @@ export default async function SettingsPage() {
           <Card className="p-5">
             <h2 className="mb-1 text-sm font-semibold text-slate-700">Webhook</h2>
             <p className="mb-3 text-xs text-slate-400">
-              外部システムへイベントを連携します（カンマ区切りでイベント指定）。
+              イベント発生時に外部システムへ署名付きでPOST配信します。
             </p>
-            {webhooks.length > 0 ? (
-              <div className="mb-3 space-y-2">
-                {webhooks.map((w) => (
-                  <div key={w.id} className="rounded-lg border border-slate-100 px-3 py-2 text-sm">
-                    <div className="truncate font-medium text-slate-700">{w.url}</div>
-                    <div className="text-xs text-slate-400">{w.events.join(", ") || "全イベント"}</div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            <form action={createWebhook} className="space-y-2">
-              <input name="url" className="input" placeholder="https://example.com/webhook" />
-              <input
-                name="events"
-                className="input"
-                placeholder="connection.accepted, message.replied"
-              />
-              <button type="submit" className="btn-ghost w-full">
-                Webhookを追加
-              </button>
-            </form>
+            <WebhookManager
+              webhooks={webhooks.map((w) => ({
+                id: w.id,
+                url: w.url,
+                events: w.events,
+                active: w.active,
+                secret: w.secret,
+                deliveries: w.deliveries.map((d) => ({
+                  id: d.id,
+                  event: d.event,
+                  statusCode: d.statusCode,
+                  success: d.success,
+                  createdAt: d.createdAt.toISOString(),
+                })),
+              }))}
+            />
           </Card>
         </div>
       </div>

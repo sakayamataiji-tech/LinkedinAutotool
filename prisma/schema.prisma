@@ -420,7 +420,27 @@ model Webhook {
   team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
   teamId    String
   url       String
-  events    String[] // e.g. ["connection.accepted", "message.replied"]
+  events    String[] // subscribed events; empty = all
   active    Boolean  @default(true)
+  secret    String? // HMAC-SHA256 signing secret
   createdAt DateTime @default(now())
+
+  deliveries WebhookDelivery[]
+}
+
+// Record of a single webhook delivery attempt.
+model WebhookDelivery {
+  id         String   @id @default(cuid())
+  webhook    Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  webhookId  String
+  event      String
+  url        String
+  statusCode Int?
+  success    Boolean  @default(false)
+  attempts   Int      @default(1)
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([webhookId])
+  @@index([createdAt])
 }
