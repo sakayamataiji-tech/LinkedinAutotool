@@ -1,0 +1,411 @@
+// LinkedIn Outreach Automation — data model
+// Prisma schema (PostgreSQL)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Organization & members (複数メンバーでの共同運用)
+// ---------------------------------------------------------------------------
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  timezone  String   @default("Asia/Tokyo")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members     Membership[]
+  campaigns   Campaign[]
+  leads       Lead[]
+  tags        Tag[]
+  sequences   Sequence[]
+  connections AccountConnection[]
+  webhooks    Webhook[]
+  limits      DailyLimit?
+  activities  ActivityLog[] @relation("teamActivities")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+}
+
+enum TeamRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Membership {
+  id     String   @id @default(cuid())
+  role   TeamRole @default(MEMBER)
+  team   Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@unique([teamId, userId])
+}
+
+// External account connections: LinkedIn seat, Gmail, Sales Navigator, Recruiter
+enum ConnectionType {
+  LINKEDIN
+  SALES_NAVIGATOR
+  RECRUITER
+  GMAIL
+  SMTP
+}
+
+model AccountConnection {
+  id          String         @id @default(cuid())
+  type        ConnectionType
+  displayName String
+  externalId  String? // account id / email
+  status      String         @default("connected") // connected | expired | error
+  team        Team           @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId      String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Leads (簡易CRM)
+// ---------------------------------------------------------------------------
+
+enum LeadSource {
+  LINKEDIN_SEARCH
+  SALES_NAVIGATOR
+  RECRUITER
+  EVENT_ATTENDEES
+  POST_LIKERS
+  POST_COMMENTERS
+  FIRST_CONNECTIONS
+  PROFILE_URL
+  CSV_IMPORT
+  MANUAL
+}
+
+model Lead {
+  id            String     @id @default(cuid())
+  team          Team       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId        String
+  firstName     String
+  lastName      String
+  headline      String?
+  company       String?
+  jobTitle      String?
+  location      String?
+  website       String?
+  profileUrl    String?
+  email         String?
+  emailStatus   String     @default("unknown") // unknown | found | not_found | verified
+  avatarUrl     String?
+  isOpenProfile Boolean    @default(false)
+  isConnected   Boolean    @default(false)
+  source        LeadSource @default(MANUAL)
+  blacklisted   Boolean    @default(false)
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  tags          LeadTag[]
+  campaignLeads CampaignLead[]
+  conversations Conversation[]
+  activities    ActivityLog[]
+
+  @@index([teamId])
+  @@index([teamId, email])
+}
+
+model Tag {
+  id     String    @id @default(cuid())
+  name   String
+  color  String    @default("#3282ff")
+  team   Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String
+  leads  LeadTag[]
+
+  @@unique([teamId, name])
+}
+
+model LeadTag {
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  leadId String
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tagId  String
+
+  @@id([leadId, tagId])
+}
+
+// ---------------------------------------------------------------------------
+// Sequences (ビジュアル形式のシーケンス / テンプレート)
+// ---------------------------------------------------------------------------
+
+// Node kinds inside a visual sequence
+enum NodeKind {
+  ACTION
+  CONDITION
+  DELAY
+}
+
+// Action types
+enum ActionType {
+  CONNECT_REQUEST // 接続リクエスト送信
+  MESSAGE // メッセージ送信
+  INMAIL // InMail送信
+  VIEW_PROFILE // プロフィール閲覧
+  ENDORSE_SKILL // スキル推薦
+  FOLLOW // フォロー
+  LIKE_POST // 投稿への「いいね」
+  FIND_EMAIL // メールアドレス検索
+  SEND_EMAIL // メール送信
+  WITHDRAW_REQUEST // 未承認の接続リクエスト取り消し
+}
+
+// Branch condition types
+enum ConditionType {
+  IS_CONNECTED // すでに接続済みか
+  MESSAGE_SEEN // メッセージを閲覧したか
+  HAS_EMAIL // メールアドレスを取得できたか
+  IS_OPEN_PROFILE // オープンプロフィールか
+}
+
+model Sequence {
+  id          String    @id @default(cuid())
+  team        Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId      String
+  name        String
+  description String?
+  isTemplate  Boolean   @default(false) // テンプレート保存
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  nodes    SequenceNode[]
+  campaign Campaign?
+}
+
+// A node in the visual sequence graph.
+model SequenceNode {
+  id         String    @id @default(cuid())
+  sequence   Sequence  @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  sequenceId String
+  kind       NodeKind
+  order      Int // execution order along the primary path
+
+  // ACTION
+  actionType   ActionType?
+  messageBody  String? // template body for MESSAGE / INMAIL / SEND_EMAIL
+  messageSubject String?
+
+  // DELAY (待機時間) — minutes to wait before the next node
+  delayMinutes Int?
+
+  // CONDITION — evaluate then branch
+  conditionType ConditionType?
+  // ids of the first node on the true / false branch
+  trueNextId    String?
+  falseNextId   String?
+
+  // graphical layout hints for the builder canvas
+  posX Float @default(0)
+  posY Float @default(0)
+
+  @@index([sequenceId])
+}
+
+// ---------------------------------------------------------------------------
+// Campaigns (キャンペーン管理)
+// ---------------------------------------------------------------------------
+
+enum CampaignStatus {
+  DRAFT
+  RUNNING
+  PAUSED
+  COMPLETED
+}
+
+model Campaign {
+  id          String         @id @default(cuid())
+  team        Team           @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId      String
+  name        String
+  description String?
+  status      CampaignStatus @default(DRAFT)
+
+  sequence   Sequence? @relation(fields: [sequenceId], references: [id])
+  sequenceId String?   @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leads       CampaignLead[]
+  activities  ActivityLog[]
+  dailyStats  CampaignDailyStat[]
+
+  @@index([teamId])
+}
+
+// Per-lead state inside a campaign (対象リードごとの進行状況)
+enum CampaignLeadStatus {
+  PENDING // 待機中
+  IN_PROGRESS // 進行中
+  COMPLETED // 完了
+  PAUSED // 一時停止
+  FAILED // 失敗
+  BLACKLISTED // ブラックリスト
+}
+
+model CampaignLead {
+  id         String             @id @default(cuid())
+  campaign   Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignId String
+  lead       Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  leadId     String
+  status     CampaignLeadStatus @default(PENDING)
+
+  currentNodeId String? // node currently being processed / next to run
+  nextRunAt     DateTime? // when the next node should execute (待機時間)
+
+  connectionAccepted Boolean @default(false)
+  replied            Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activities ActivityLog[]
+
+  @@unique([campaignId, leadId])
+  @@index([status])
+  @@index([nextRunAt])
+}
+
+// Rolled-up daily metrics per campaign (日次推移のグラフ表示)
+model CampaignDailyStat {
+  id         String   @id @default(cuid())
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignId String
+  date       DateTime @db.Date
+
+  connectionsSent     Int @default(0)
+  connectionsAccepted Int @default(0)
+  messagesSent        Int @default(0)
+  repliesReceived     Int @default(0)
+  inmailsSent         Int @default(0)
+  profilesViewed      Int @default(0)
+  emailsSent          Int @default(0)
+
+  @@unique([campaignId, date])
+}
+
+// ---------------------------------------------------------------------------
+// Inbox (受信箱) — conversations & messages
+// ---------------------------------------------------------------------------
+
+model Conversation {
+  id         String   @id @default(cuid())
+  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  leadId     String
+  channel    String   @default("linkedin") // linkedin | email | inmail
+  unread     Boolean  @default(false)
+  important  Boolean  @default(false)
+  archived   Boolean  @default(false)
+  lastMessageAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  messages Message[]
+
+  @@index([leadId])
+  @@index([archived, unread])
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+model Message {
+  id             String           @id @default(cuid())
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  direction      MessageDirection
+  body           String
+  seen           Boolean          @default(false) // whether the recipient has seen it
+  sentAt         DateTime         @default(now())
+
+  @@index([conversationId])
+}
+
+// ---------------------------------------------------------------------------
+// Activity log / execution history (過去のキャンペーン進捗履歴)
+// ---------------------------------------------------------------------------
+
+model ActivityLog {
+  id             String        @id @default(cuid())
+  team           Team?         @relation("teamActivities", fields: [teamId], references: [id], onDelete: Cascade)
+  teamId         String?
+  campaign       Campaign?     @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  campaignId     String?
+  campaignLead   CampaignLead? @relation(fields: [campaignLeadId], references: [id], onDelete: SetNull)
+  campaignLeadId String?
+  lead           Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  leadId         String?
+
+  actionType ActionType?
+  status     String // success | failed | skipped
+  detail     String?
+  createdAt  DateTime @default(now())
+
+  @@index([campaignId])
+  @@index([leadId])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Guardrails and integrations
+// ---------------------------------------------------------------------------
+
+// Daily activity caps + working hours (過剰なアクションを防ぐ上限設定)
+model DailyLimit {
+  id       String @id @default(cuid())
+  team     Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId   String @unique
+
+  maxConnectionRequests Int @default(20)
+  maxMessages           Int @default(50)
+  maxInmails            Int @default(10)
+  maxProfileViews       Int @default(100)
+  maxEndorsements       Int @default(20)
+  maxLikes              Int @default(30)
+  maxFollows            Int @default(30)
+  maxEmails             Int @default(50)
+
+  // Working hours per weekday. JSON array of 7 { enabled, start, end } entries (Mon..Sun)
+  workingHours Json?
+  timezone     String @default("Asia/Tokyo")
+
+  updatedAt DateTime @updatedAt
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId    String
+  url       String
+  events    String[] // e.g. ["connection.accepted", "message.replied"]
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
