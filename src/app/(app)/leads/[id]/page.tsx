@@ -47,6 +47,11 @@ export default async function LeadDetail({ params }: { params: Promise<{ id: str
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {lead.isConnected ? <Badge>IN_PROGRESS</Badge> : null}
         {lead.blacklisted ? <Badge>BLACKLISTED</Badge> : null}
+        {lead.campaignLeads.some((cl) => cl.replied) ? (
+          <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+            返信あり · 自動停止
+          </span>
+        ) : null}
         {lead.tags.map((lt) => (
           <Tag key={lt.tagId} name={lt.tag.name} color={lt.tag.color} />
         ))}

@@ -151,6 +151,14 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
     });
     return { campaignLeadId, processed: false, reason: "blacklisted" };
   }
+  // Safety net: never keep automating a lead who has already replied.
+  if (cl.replied) {
+    await prisma.campaignLead.update({
+      where: { id: cl.id },
+      data: { status: "PAUSED", nextRunAt: null },
+    });
+    return { campaignLeadId, processed: false, reason: "replied" };
+  }
 
   const nodes = cl.campaign.sequence?.nodes ?? [];
   if (nodes.length === 0) {

@@ -210,6 +210,23 @@ export async function updateWorkingHours(formData: FormData) {
   revalidatePath("/settings");
 }
 
+/**
+ * Demo helper: inject an inbound reply from a lead, which triggers reply
+ * detection + auto-pause. In production this path is driven by a LinkedIn/email
+ * webhook or the scheduler's reply poller.
+ */
+export async function simulateReplyAction(leadId: string, channel = "linkedin") {
+  const { recordInboundReply } = await import("./replies");
+  await recordInboundReply(
+    leadId,
+    "ご連絡ありがとうございます。ぜひ一度お話しできればと思います。",
+    channel,
+  );
+  revalidatePath("/inbox");
+  revalidatePath("/");
+  revalidatePath(`/leads/${leadId}`);
+}
+
 export async function runSchedulerNow() {
   const { runScheduler } = await import("./schedule");
   // Manual trigger ignores working hours by intent.

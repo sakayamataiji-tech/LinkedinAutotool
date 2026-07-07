@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getCurrentTeamId } from "@/lib/session";
 import { Card, PageHeader } from "@/components/ui";
-import { FlagButtons, ReplyBox } from "@/components/InboxControls";
+import { FlagButtons, ReplyBox, SimulateReplyButton } from "@/components/InboxControls";
 import type { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 const FILTERS = [
   { key: "all", label: "すべて" },
   { key: "unread", label: "未読" },
+  { key: "replied", label: "返信あり" },
   { key: "important", label: "重要" },
   { key: "archived", label: "アーカイブ" },
 ];
@@ -26,6 +27,7 @@ export default async function InboxPage({
   if (filter === "unread") where.unread = true;
   else if (filter === "important") where.important = true;
   else if (filter === "archived") where.archived = true;
+  else if (filter === "replied") where.messages = { some: { direction: "INBOUND" } };
   else where.archived = false;
 
   const conversations = await prisma.conversation.findMany({
@@ -114,11 +116,14 @@ export default async function InboxPage({
                     {selected.lead.jobTitle} {selected.lead.company ? `@ ${selected.lead.company}` : ""}
                   </div>
                 </div>
-                <FlagButtons
-                  conversationId={selected.id}
-                  important={selected.important}
-                  archived={selected.archived}
-                />
+                <div className="flex items-center gap-2">
+                  <SimulateReplyButton leadId={selected.lead.id} />
+                  <FlagButtons
+                    conversationId={selected.id}
+                    important={selected.important}
+                    archived={selected.archived}
+                  />
+                </div>
               </div>
 
               <div className="flex-1 space-y-3 overflow-y-auto p-4" style={{ maxHeight: "48vh" }}>

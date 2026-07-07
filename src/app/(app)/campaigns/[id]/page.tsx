@@ -130,7 +130,14 @@ export default async function CampaignDetail({ params }: { params: Promise<{ id:
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge>{cl.status}</Badge>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Badge>{cl.status}</Badge>
+                          {cl.replied ? (
+                            <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                              返信あり
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-slate-500">
                         {cl.connectionAccepted ? "✓ 承認" : cl.lead.isConnected ? "接続済" : "—"}

@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { runDueSteps } from "./engine";
+import { pollRepliesForTeam } from "./replies";
 
 /**
  * Automatic scheduler.
@@ -70,6 +71,7 @@ export interface SchedulerResult {
   teamsConsidered: number;
   teamsRun: number;
   processed: number;
+  repliesDetected: number;
   skipped: { teamId: string; teamName: string; reason: string }[];
 }
 
@@ -87,10 +89,16 @@ export async function runScheduler(opts: { ignoreWorkingHours?: boolean } = {}):
     teamsConsidered: teams.length,
     teamsRun: 0,
     processed: 0,
+    repliesDetected: 0,
     skipped: [],
   };
 
   for (const team of teams) {
+    // Reply detection + auto-pause runs regardless of working hours — we always
+    // want to stop automating a lead the moment they reply.
+    const { detected } = await pollRepliesForTeam(team.id);
+    result.repliesDetected += detected;
+
     const tz = team.limits?.timezone ?? team.timezone;
     const within =
       opts.ignoreWorkingHours ||

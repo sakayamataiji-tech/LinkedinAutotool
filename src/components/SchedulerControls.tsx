@@ -86,7 +86,7 @@ export function RunNowButton() {
           start(async () => {
             const r = await runSchedulerNow();
             setMsg(
-              `実行: ${r.processed} ステップ / ${r.teamsRun} チーム（対象 ${r.teamsConsidered}）`,
+              `実行: ${r.processed} ステップ / ${r.teamsRun} チーム · 返信検知 ${r.repliesDetected} 件`,
             );
           })
         }

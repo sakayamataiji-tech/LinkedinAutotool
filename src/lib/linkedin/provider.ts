@@ -49,8 +49,21 @@ export interface ConditionRequest {
   lead: LeadContext;
 }
 
+export interface ReplyCheck {
+  replied: boolean;
+  /** Body of the inbound reply, when replied. */
+  body?: string;
+  channel?: string;
+}
+
 export interface LinkedInProvider {
   readonly name: string;
   execute(req: ActionRequest): Promise<ActionResult>;
   evaluate(req: ConditionRequest): Promise<boolean>;
+  /**
+   * Check whether a lead has sent an inbound reply. In production this maps to
+   * a webhook/poll against LinkedIn or email; the caller only asks about leads
+   * that have already been messaged and have no recorded inbound message yet.
+   */
+  checkReply(lead: LeadContext): Promise<ReplyCheck>;
 }
