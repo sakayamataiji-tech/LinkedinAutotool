@@ -10,6 +10,7 @@ async function main() {
 
   // Clean slate (dev only)
   await prisma.session.deleteMany();
+  await prisma.webhookJob.deleteMany();
   await prisma.webhookDelivery.deleteMany();
   await prisma.message.deleteMany();
   await prisma.conversation.deleteMany();

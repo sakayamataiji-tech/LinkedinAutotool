@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import { runDueSteps } from "./engine";
 import { pollRepliesForTeam } from "./replies";
+import { drainWebhookJobs } from "./webhooks";
 
 /**
  * Automatic scheduler.
@@ -72,6 +73,7 @@ export interface SchedulerResult {
   teamsRun: number;
   processed: number;
   repliesDetected: number;
+  webhooksDelivered: number;
   skipped: { teamId: string; teamName: string; reason: string }[];
 }
 
@@ -90,6 +92,7 @@ export async function runScheduler(opts: { ignoreWorkingHours?: boolean } = {}):
     teamsRun: 0,
     processed: 0,
     repliesDetected: 0,
+    webhooksDelivered: 0,
     skipped: [],
   };
 
@@ -113,6 +116,11 @@ export async function runScheduler(opts: { ignoreWorkingHours?: boolean } = {}):
     result.processed += processed;
     result.teamsRun++;
   }
+
+  // Drain the webhook outbox (delivery is decoupled from the engine). Runs
+  // regardless of working hours so events flow out promptly.
+  const drain = await drainWebhookJobs(200);
+  result.webhooksDelivered = drain.delivered;
 
   return result;
 }

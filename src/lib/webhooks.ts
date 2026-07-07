@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { WEBHOOK_EVENTS, type WebhookEvent } from "./webhook-events";
 
@@ -79,19 +80,15 @@ interface WebhookRow {
   secret: string | null;
 }
 
-/** Deliver one event to one webhook with retries; records the outcome. */
-async function deliverToWebhook(
+/** One delivery attempt to one webhook; records a WebhookDelivery row. */
+async function deliverAttempt(
   webhook: WebhookRow,
-  event: WebhookEvent,
+  event: string,
   payload: unknown,
-): Promise<boolean> {
+  attemptNo: number,
+): Promise<{ ok: boolean; statusCode: number | null; error: string | null }> {
   const deliveryId = randomHex(12);
-  const body = JSON.stringify({
-    id: deliveryId,
-    event,
-    // Timestamp is set by the DB row; receivers can also read the header.
-    data: payload,
-  });
+  const body = JSON.stringify({ id: deliveryId, event, data: payload });
   const secret = webhook.secret ?? "";
   const headers: Record<string, string> = {
     "X-LA-Event": event,
@@ -100,34 +97,26 @@ async function deliverToWebhook(
   };
   if (secret) headers["X-LA-Signature"] = `sha256=${await hmacSha256(secret, body)}`;
 
-  let last = { statusCode: null as number | null, ok: false, error: "not attempted" as string | null };
-  let attempts = 0;
-  for (let i = 0; i < MAX_ATTEMPTS; i++) {
-    attempts = i + 1;
-    last = await deliverOnce(webhook.url, body, headers);
-    if (last.ok) break;
-    if (i < MAX_ATTEMPTS - 1) await new Promise((r) => setTimeout(r, 200 * (i + 1)));
-  }
-
+  const res = await deliverOnce(webhook.url, body, headers);
   await prisma.webhookDelivery.create({
     data: {
       webhookId: webhook.id,
       event,
       url: webhook.url,
-      statusCode: last.statusCode ?? undefined,
-      success: last.ok,
-      attempts,
-      error: last.error ?? undefined,
+      statusCode: res.statusCode ?? undefined,
+      success: res.ok,
+      attempts: attemptNo,
+      error: res.error ?? undefined,
     },
   });
-
-  return last.ok;
+  return res;
 }
 
 /**
- * Dispatch an event to every active webhook of a team subscribed to it
- * (empty subscription list = all events). Runs deliveries in parallel and
- * swallows all errors.
+ * Enqueue an event for every active webhook of a team subscribed to it (empty
+ * subscription list = all events). This is FAST — it only writes outbox rows,
+ * so the sequence engine never blocks on HTTP. Delivery happens asynchronously
+ * in `drainWebhookJobs` (run by the scheduler). Never throws.
  */
 export async function dispatchWebhookEvent(
   teamId: string,
@@ -137,24 +126,131 @@ export async function dispatchWebhookEvent(
   try {
     const webhooks = await prisma.webhook.findMany({
       where: { teamId, active: true },
-      select: { id: true, url: true, secret: true, events: true },
+      select: { id: true, events: true },
     });
-    const targets = webhooks.filter(
-      (w) => w.events.length === 0 || w.events.includes(event),
-    );
+    const targets = webhooks.filter((w) => w.events.length === 0 || w.events.includes(event));
     if (targets.length === 0) return;
-    await Promise.all(targets.map((w) => deliverToWebhook(w, event, payload)));
+    await prisma.webhookJob.createMany({
+      data: targets.map((w) => ({
+        webhookId: w.id,
+        event,
+        payload: (payload ?? {}) as Prisma.InputJsonValue,
+      })),
+    });
   } catch (err) {
-    console.error("[webhook] dispatch error", err);
+    console.error("[webhook] enqueue error", err);
   }
 }
 
-/** Send a test `ping` to a single webhook (ignores subscription filter). */
+function backoffMinutes(attempts: number): number {
+  // 1, 2, 4, 8 … capped at 30 minutes.
+  return Math.min(2 ** (attempts - 1), 30);
+}
+
+interface ClaimedJob {
+  id: string;
+  webhookId: string;
+  event: string;
+  payload: unknown;
+  attempts: number;
+}
+
+/**
+ * Deliver queued webhook jobs. Claims due pending jobs with FOR UPDATE SKIP
+ * LOCKED (safe across concurrent drainers), attempts delivery, and reschedules
+ * failures with exponential backoff until MAX_ATTEMPTS, then marks them failed.
+ */
+export async function drainWebhookJobs(limit = 100): Promise<{
+  delivered: number;
+  retried: number;
+  failed: number;
+}> {
+  let claimed: ClaimedJob[] = [];
+  try {
+    claimed = await prisma.$queryRaw<ClaimedJob[]>(Prisma.sql`
+      UPDATE "WebhookJob" AS t
+      SET "lockedAt" = now()
+      WHERE t.id IN (
+        SELECT id FROM "WebhookJob"
+        WHERE status = 'pending'
+          AND "nextAttemptAt" <= now()
+          AND ("lockedAt" IS NULL OR "lockedAt" < now() - interval '2 minutes')
+        ORDER BY "nextAttemptAt" ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT ${limit}
+      )
+      RETURNING t.id, t."webhookId", t.event, t.payload, t.attempts;
+    `);
+  } catch (err) {
+    console.error("[webhook] claim error", err);
+    return { delivered: 0, retried: 0, failed: 0 };
+  }
+
+  let delivered = 0;
+  let retried = 0;
+  let failed = 0;
+
+  await Promise.all(
+    claimed.map(async (job) => {
+      const webhook = await prisma.webhook.findUnique({
+        where: { id: job.webhookId },
+        select: { id: true, url: true, secret: true, active: true },
+      });
+      // Webhook removed/disabled: drop the job.
+      if (!webhook || !webhook.active) {
+        await prisma.webhookJob.update({
+          where: { id: job.id },
+          data: { status: "failed", lockedAt: null, lastError: "webhook missing/inactive" },
+        });
+        failed++;
+        return;
+      }
+
+      const attemptNo = job.attempts + 1;
+      const res = await deliverAttempt(webhook, job.event, job.payload, attemptNo);
+
+      if (res.ok) {
+        await prisma.webhookJob.update({
+          where: { id: job.id },
+          data: { status: "delivered", attempts: attemptNo, lockedAt: null, lastError: null },
+        });
+        delivered++;
+      } else if (attemptNo >= MAX_ATTEMPTS) {
+        await prisma.webhookJob.update({
+          where: { id: job.id },
+          data: { status: "failed", attempts: attemptNo, lockedAt: null, lastError: res.error },
+        });
+        failed++;
+      } else {
+        await prisma.webhookJob.update({
+          where: { id: job.id },
+          data: {
+            attempts: attemptNo,
+            lockedAt: null,
+            lastError: res.error,
+            nextAttemptAt: new Date(Date.now() + backoffMinutes(attemptNo) * 60_000),
+          },
+        });
+        retried++;
+      }
+    }),
+  );
+
+  return { delivered, retried, failed };
+}
+
+/** Send a test `ping` to a single webhook immediately (manual, synchronous). */
 export async function sendTestWebhook(webhookId: string): Promise<boolean> {
   const webhook = await prisma.webhook.findUnique({
     where: { id: webhookId },
     select: { id: true, url: true, secret: true },
   });
   if (!webhook) return false;
-  return deliverToWebhook(webhook, "ping", { message: "テスト配信", at: new Date().toISOString() });
+  const res = await deliverAttempt(
+    webhook,
+    "ping",
+    { message: "テスト配信", at: new Date().toISOString() },
+    1,
+  );
+  return res.ok;
 }

@@ -472,6 +472,27 @@ model Webhook {
   createdAt DateTime @default(now())
 
   deliveries WebhookDelivery[]
+  jobs       WebhookJob[]
+}
+
+// Durable outbox: events are enqueued instantly (engine never blocks on HTTP),
+// then a drainer delivers them asynchronously with retry/backoff.
+model WebhookJob {
+  id            String    @id @default(cuid())
+  webhook       Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  webhookId     String
+  event         String
+  payload       Json
+  status        String    @default("pending") // pending | delivered | failed
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?
+  lockedAt      DateTime? // claimed by a drainer (SKIP LOCKED)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([lockedAt])
 }
 
 // Record of a single webhook delivery attempt.
