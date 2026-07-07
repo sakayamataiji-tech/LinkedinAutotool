@@ -19,6 +19,7 @@ LinkedIn上での営業・採用・リード獲得活動を効率化・自動化
 
 | 領域 | 内容 |
 | --- | --- |
+| 認証・マルチテナント | メール/パスワードのサインアップ・ログイン・ログアウト、DBセッション＋httpOnly Cookie、チーム切替、テナント分離、メンバー招待 |
 | ダッシュボード | 全キャンペーン横断の接続承認率・返信率・リード数・最近のアクティビティ |
 | キャンペーン管理 | 作成 / 実行 / 一時停止・再開、ステータス内訳、日次推移グラフ、CSVエクスポート |
 | リード管理（簡易CRM） | 検索・タグ絞り込み、プロフィール情報、メモ、ブラックリスト、キャンペーン進捗履歴、アクティビティ履歴 |
@@ -37,21 +38,32 @@ LinkedIn上での営業・採用・リード獲得活動を効率化・自動化
 
 ```
 src/
-├── app/                    # App Router のページ & API ルート
-│   ├── page.tsx            # ダッシュボード
-│   ├── campaigns/          # キャンペーン一覧・詳細 + CSVエクスポートAPI
-│   ├── leads/              # リードCRM 一覧・詳細
-│   ├── sequences/          # シーケンス一覧・ビルダー
-│   ├── inbox/              # 受信箱
-│   └── settings/           # 設定
+├── middleware.ts           # 認証ガード（Cookie有無でリダイレクト、Edge）
+├── app/
+│   ├── layout.tsx          # ルートレイアウト（html/body）
+│   ├── (auth)/             # 未認証向け: /login, /signup
+│   ├── (app)/              # 認証必須（サイドバー＋上部バー）
+│   │   ├── layout.tsx      # requireAuth() ＋ チーム切替バー
+│   │   ├── page.tsx        # ダッシュボード
+│   │   ├── campaigns/      # キャンペーン一覧・詳細
+│   │   ├── leads/          # リードCRM 一覧・詳細
+│   │   ├── sequences/      # シーケンス一覧・ビルダー
+│   │   ├── inbox/          # 受信箱
+│   │   └── settings/       # 設定（上限/連携/Webhook/メンバー）
+│   ├── teams/new/          # チーム作成
+│   └── api/                # CSVエクスポート等
 ├── components/             # UIコンポーネント（サーバー/クライアント）
 └── lib/
     ├── prisma.ts           # Prisma クライアント
-    ├── session.ts          # 現在のチーム解決（認証は今後）
+    ├── session.ts          # 認証必須化＋現在チーム解決（テナント分離の要）
     ├── actions.ts          # Server Actions（各種ミューテーション）
     ├── engine.ts           # シーケンス実行エンジン
     ├── metrics.ts          # 成果指標・日次推移の集計
     ├── text.ts             # 敬称/学位/絵文字の除去・テンプレート差し込み
+    ├── auth/               # 認証層
+    │   ├── password.ts     # scrypt ハッシュ/検証
+    │   ├── session.ts      # セッション/Cookie 管理
+    │   └── actions.ts      # signup/login/logout/switchTeam/invite
     └── linkedin/           # 差し替え可能なプロバイダ層
         ├── provider.ts     # LinkedInProvider インターフェース
         ├── mock.ts         # モック実装（決定論的な擬似結果）
@@ -82,6 +94,24 @@ npm run dev
 # http://localhost:3000
 ```
 
+### デモログイン
+
+シード投入後、以下でログインできます（未認証は自動的に `/login` へリダイレクト）。
+
+- **Email**: `sakayama.taiji@zeeta.co.jp` / **Password**: `password123`（2チームに所属）
+- **Email**: `member@zeeta.co.jp` / **Password**: `password123`
+
+## 認証・マルチテナント
+
+- **認証**: メール/パスワード。パスワードは Node 標準 `crypto` の scrypt でハッシュ化（外部依存なし）。
+  サーバー側 `Session` テーブルを httpOnly Cookie で参照。
+- **ガード**: `middleware.ts` が Cookie 有無で `/login` 等へ振り分け（Edge）。実際の検証は
+  各ページ/アクションの `requireAuth()` がサーバー側で実施。
+- **マルチテナント**: ユーザーは `Membership` で複数チームに所属。`getCurrentTeam()` がセッションの
+  `activeTeamId` から現在のチームを解決し、**全データクエリを `teamId` で分離**。上部バーの
+  チーム切替でアクティブチームを変更でき、切替後は別チームのデータが一切表示されない（分離を確認済み）。
+- **メンバー**: 設定画面から登録済みユーザーをメール招待（MVPでは既存ユーザーの紐付け）。
+
 ## 動作確認済みの主要フロー
 
 - 全ページ（ダッシュボード / キャンペーン / リード / シーケンス / 受信箱 / 設定）がレンダリング
@@ -92,7 +122,6 @@ npm run dev
 
 ## 今後の拡張ポイント
 
-- 認証・マルチテナント（現状は最初のチームを暗黙選択）
 - 本番 LinkedIn プロバイダ実装
 - バックグラウンドスケジューラ（cron / queue）による自動実行
 - リード取り込み（各種ソース連携・CSVアップロードUI）

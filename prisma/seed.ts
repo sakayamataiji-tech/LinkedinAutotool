@@ -1,11 +1,15 @@
 import { PrismaClient, type ActionType, type LeadSource } from "@prisma/client";
+import { hashPassword } from "../src/lib/auth/password";
 
 const prisma = new PrismaClient();
+
+const DEMO_PASSWORD = "password123";
 
 async function main() {
   console.log("Seeding…");
 
   // Clean slate (dev only)
+  await prisma.session.deleteMany();
   await prisma.message.deleteMany();
   await prisma.conversation.deleteMany();
   await prisma.activityLog.deleteMany();
@@ -28,12 +32,31 @@ async function main() {
     data: { name: "Zeeta 営業チーム", timezone: "Asia/Tokyo" },
   });
 
+  const passwordHash = await hashPassword(DEMO_PASSWORD);
+
   const owner = await prisma.user.create({
-    data: { email: "sakayama.taiji@zeeta.co.jp", name: "坂山 泰司" },
+    data: { email: "sakayama.taiji@zeeta.co.jp", name: "坂山 泰司", passwordHash },
   });
   await prisma.membership.create({
     data: { teamId: team.id, userId: owner.id, role: "OWNER" },
   });
+
+  // A second member for the sales team (demonstrates multi-member operation).
+  const member = await prisma.user.create({
+    data: { email: "member@zeeta.co.jp", name: "佐藤 花子", passwordHash },
+  });
+  await prisma.membership.create({
+    data: { teamId: team.id, userId: member.id, role: "MEMBER" },
+  });
+
+  // A second team the owner also belongs to (demonstrates team switching + tenant isolation).
+  const recruitingTeam = await prisma.team.create({
+    data: { name: "Zeeta 採用チーム", timezone: "Asia/Tokyo" },
+  });
+  await prisma.membership.create({
+    data: { teamId: recruitingTeam.id, userId: owner.id, role: "OWNER" },
+  });
+  await prisma.dailyLimit.create({ data: { teamId: recruitingTeam.id } });
 
   await prisma.dailyLimit.create({
     data: {
@@ -226,8 +249,9 @@ async function main() {
   });
 
   console.log(
-    `Seeded: team=${team.name}, leads=${leads.length}, sequence nodes=${nodeDefs.length}, campaign=${campaign.name}`,
+    `Seeded: teams=[${team.name}, ${recruitingTeam.name}], leads=${leads.length}, sequence nodes=${nodeDefs.length}, campaign=${campaign.name}`,
   );
+  console.log(`Demo login: ${owner.email} / ${DEMO_PASSWORD}  (also ${member.email})`);
 }
 
 main()

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getCurrentTeamId } from "@/lib/session";
 import { updateDailyLimits, createWebhook } from "@/lib/actions";
+import { inviteMemberAction } from "@/lib/auth/actions";
 import { Card, PageHeader } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -26,10 +27,15 @@ const LIMIT_FIELDS: { name: string; label: string; def: number }[] = [
 
 export default async function SettingsPage() {
   const teamId = await getCurrentTeamId();
-  const [limits, connections, webhooks] = await Promise.all([
+  const [limits, connections, webhooks, members] = await Promise.all([
     prisma.dailyLimit.findUnique({ where: { teamId } }),
     prisma.accountConnection.findMany({ where: { teamId } }),
     prisma.webhook.findMany({ where: { teamId } }),
+    prisma.membership.findMany({
+      where: { teamId },
+      include: { user: true },
+      orderBy: { role: "asc" },
+    }),
   ]);
 
   const limitVal = (name: string, def: number) =>
@@ -37,7 +43,7 @@ export default async function SettingsPage() {
 
   return (
     <div>
-      <PageHeader title="設定" subtitle="上限・稼働時間・連携・Webhook" />
+      <PageHeader title="設定" subtitle="メンバー・上限・稼働時間・連携・Webhook" />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card className="p-5">
@@ -126,6 +132,47 @@ export default async function SettingsPage() {
           </Card>
         </div>
       </div>
+
+      <Card className="mt-6 p-5">
+        <h2 className="mb-1 text-sm font-semibold text-slate-700">チームメンバー</h2>
+        <p className="mb-4 text-xs text-slate-400">
+          複数メンバーでの共同運用。登録済みユーザーのメールアドレスで招待できます。
+        </p>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="space-y-2">
+            {members.map((m) => (
+              <div
+                key={m.id}
+                className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2"
+              >
+                <div>
+                  <div className="text-sm font-medium text-slate-700">{m.user.name}</div>
+                  <div className="text-xs text-slate-400">{m.user.email}</div>
+                </div>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                  {m.role}
+                </span>
+              </div>
+            ))}
+          </div>
+          <form action={inviteMemberAction} className="space-y-2">
+            <div>
+              <label className="label">招待するメールアドレス</label>
+              <input name="email" type="email" className="input" placeholder="member@company.com" />
+            </div>
+            <div>
+              <label className="label">権限</label>
+              <select name="role" className="input">
+                <option value="MEMBER">メンバー</option>
+                <option value="ADMIN">管理者</option>
+              </select>
+            </div>
+            <button type="submit" className="btn-ghost w-full">
+              メンバーを招待
+            </button>
+          </form>
+        </div>
+      </Card>
     </div>
   );
 }
