@@ -2,6 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentTeamId } from "@/lib/session";
 import { updateDailyLimits, createWebhook } from "@/lib/actions";
 import { inviteMemberAction } from "@/lib/auth/actions";
+import { WorkingHoursEditor, RunNowButton } from "@/components/SchedulerControls";
+import { isWithinWorkingHours } from "@/lib/schedule";
 import { Card, PageHeader } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +42,12 @@ export default async function SettingsPage() {
 
   const limitVal = (name: string, def: number) =>
     limits ? (limits as unknown as Record<string, number>)[name] ?? def : def;
+
+  const timezone = limits?.timezone ?? "Asia/Tokyo";
+  const workingHours =
+    (limits?.workingHours as { enabled: boolean; start: string; end: string }[] | null) ?? null;
+  const schedulerActive = isWithinWorkingHours(limits?.workingHours, timezone);
+  const inProcess = process.env.ENABLE_INPROCESS_SCHEDULER === "true";
 
   return (
     <div>
@@ -132,6 +140,44 @@ export default async function SettingsPage() {
           </Card>
         </div>
       </div>
+
+      <Card className="mt-6 p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-700">自動実行スケジューラ</h2>
+            <p className="mt-1 text-xs text-slate-400">
+              稼働中キャンペーンを稼働時間内で自動進行します。手動で今すぐ実行することもできます。
+            </p>
+          </div>
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+              schedulerActive ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"
+            }`}
+          >
+            {schedulerActive ? "稼働時間内" : "稼働時間外"}
+          </span>
+        </div>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div>
+            <h3 className="mb-2 text-xs font-medium text-slate-500">曜日ごとの稼働時間</h3>
+            <WorkingHoursEditor initial={workingHours} timezone={timezone} />
+          </div>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-slate-100 p-3 text-xs text-slate-500">
+              <div className="mb-1 font-medium text-slate-600">自動実行の設定方法</div>
+              <ul className="list-disc space-y-1 pl-4">
+                <li>Vercel: <code>vercel.json</code> の cron が <code>/api/cron/run</code> を定期実行</li>
+                <li>セルフホスト: <code>ENABLE_INPROCESS_SCHEDULER=true</code> で常駐実行</li>
+                <li>ローカル: <code>npm run scheduler</code> でポーリング実行</li>
+              </ul>
+              <div className="mt-2">
+                インプロセス常駐: {inProcess ? "有効" : "無効"}
+              </div>
+            </div>
+            <RunNowButton />
+          </div>
+        </div>
+      </Card>
 
       <Card className="mt-6 p-5">
         <h2 className="mb-1 text-sm font-semibold text-slate-700">チームメンバー</h2>

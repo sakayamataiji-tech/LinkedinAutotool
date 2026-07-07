@@ -193,6 +193,33 @@ export async function updateDailyLimits(formData: FormData) {
   revalidatePath("/settings");
 }
 
+export async function updateWorkingHours(formData: FormData) {
+  const teamId = await getCurrentTeamId();
+  const timezone = String(formData.get("timezone") ?? "Asia/Tokyo");
+  // 7 days, index 0 = Monday .. 6 = Sunday.
+  const workingHours = Array.from({ length: 7 }).map((_, i) => ({
+    enabled: formData.get(`wh_${i}_enabled`) === "on",
+    start: String(formData.get(`wh_${i}_start`) ?? "09:00"),
+    end: String(formData.get(`wh_${i}_end`) ?? "18:00"),
+  }));
+  await prisma.dailyLimit.upsert({
+    where: { teamId },
+    update: { workingHours, timezone },
+    create: { teamId, workingHours, timezone },
+  });
+  revalidatePath("/settings");
+}
+
+export async function runSchedulerNow() {
+  const { runScheduler } = await import("./schedule");
+  // Manual trigger ignores working hours by intent.
+  const result = await runScheduler({ ignoreWorkingHours: true });
+  revalidatePath("/");
+  revalidatePath("/settings");
+  revalidatePath("/inbox");
+  return result;
+}
+
 export async function createWebhook(formData: FormData) {
   const teamId = await getCurrentTeamId();
   const url = String(formData.get("url") ?? "").trim();
