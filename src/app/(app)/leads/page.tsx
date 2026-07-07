@@ -55,7 +55,15 @@ export default async function LeadsPage({
 
   return (
     <div>
-      <PageHeader title="リード管理" subtitle={`簡易CRM · 全 ${total} 件`} />
+      <PageHeader
+        title="リード管理"
+        subtitle={`簡易CRM · 全 ${total} 件`}
+        action={
+          <Link href="/leads/import" className="btn-primary">
+            ＋ リードを取り込む
+          </Link>
+        }
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
