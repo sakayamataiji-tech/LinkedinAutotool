@@ -77,8 +77,35 @@ src/
         └── index.ts        # getProvider()
 ```
 
-**プロバイダ差し替え**: `src/lib/linkedin/index.ts` の `getProvider()` を実装差し替えするだけで、
-ブラウザ自動化や外部API連携などの本番プロバイダに移行できます（エンジン・UIは無変更）。
+**プロバイダ差し替え**: `LINKEDIN_PROVIDER` 環境変数で切り替えます。`mock`（既定・アカウント不要の
+決定論シミュレーション）と `playwright`（実際のLinkedInブラウザ自動化）。エンジン・UIは無変更。
+
+## 本番 LinkedIn プロバイダ（Playwright）
+
+> ⚠️ **重要**: LinkedInの自動操作はLinkedInの利用規約（User Agreement）に抵触し、**アカウントの
+> 制限・永久BAN**につながる可能性があります。利用は自己責任で、**自分のアカウント**に対してのみ、
+> 保守的な量で行ってください。日次上限・稼働時間・人間らしい間隔（実装済み）を必ず有効にしてください。
+
+`src/lib/linkedin/playwright.ts` が `LinkedInProvider` を実装します。認証はパスワードではなく、
+自分のセッションCookie **`li_at`** を使用します（`browser.ts` がChromiumに注入）。
+
+### セットアップ
+
+```bash
+# .env
+LINKEDIN_PROVIDER="playwright"
+LINKEDIN_LI_AT="<ブラウザのlinkedin.comから取得したli_atクッキー値>"
+PLAYWRIGHT_CHROMIUM_PATH="/path/to/chromium"   # 任意（未指定ならplaywright-core既定）
+LINKEDIN_DRY_RUN="true"                          # まずはドライラン推奨（クリックせず遷移のみ）
+```
+
+- **対応アクション**: プロフィール閲覧 / 接続リクエスト / メッセージ / フォロー / いいね。
+  未対応（InMail・スキル推薦・メール検索・メール送信）は安全にスキップしてシーケンスを継続。
+- **条件**: `IS_CONNECTED` を実装（1次接続の判定）。他はベストエフォート。
+- **設計上の注意**: LinkedInのDOMは頻繁に変わるため、**セレクタは実環境で要検証**です。各アクションは
+  例外を捕捉し、失敗時はエンジンにログされます。`LINKEDIN_DRY_RUN=true` で遷移・読み取りのみ実行できます。
+- `playwright-core` は動的import（`webpackIgnore`）で読み込むため、バンドルには含まれず Node 実行時のみ
+  ロードされます。ブラウザ本体は別途用意が必要です。
 
 ## 自動実行スケジューラ
 
@@ -163,7 +190,8 @@ npm run dev
 
 ## 今後の拡張ポイント
 
-- 本番 LinkedIn プロバイダ実装（各ソースからの実データ取り込み）
+- Playwrightプロバイダのセレクタ整備・checkReply/未対応アクションの実装、チームごとの `li_at` 保管
+- 各ソースからの実データ取り込み（現状は検索系がモック生成）
 - CSV取り込みの列マッピングを手動調整するプレビュー画面
 - A/Bテストの統計的有意差判定（現状は素の返信率比較）
 - バックグラウンドスケジューラ（cron / queue）による自動実行
