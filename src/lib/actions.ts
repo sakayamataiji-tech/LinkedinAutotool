@@ -96,9 +96,87 @@ export async function addSequenceNode(formData: FormData) {
   revalidatePath(`/sequences/${sequenceId}`);
 }
 
+export interface NodeInput {
+  kind: NodeKind;
+  actionType?: string | null;
+  messageBody?: string | null;
+  messageSubject?: string | null;
+  delayMinutes?: number | null;
+  conditionType?: string | null;
+  posX?: number;
+  posY?: number;
+}
+
+/** Create a node from the flow editor and return its id (for placement). */
+export async function createNode(sequenceId: string, input: NodeInput): Promise<{ id: string } | null> {
+  const teamId = await getCurrentTeamId();
+  const seq = await prisma.sequence.findFirst({ where: { id: sequenceId, teamId } });
+  if (!seq) return null;
+  const count = await prisma.sequenceNode.count({ where: { sequenceId } });
+  const node = await prisma.sequenceNode.create({
+    data: {
+      sequenceId,
+      kind: input.kind,
+      order: count,
+      posX: input.posX ?? 0,
+      posY: input.posY ?? count * 120,
+      actionType: input.kind === "ACTION" ? (input.actionType as ActionType) ?? null : null,
+      messageBody: input.kind === "ACTION" ? input.messageBody ?? null : null,
+      messageSubject: input.kind === "ACTION" ? input.messageSubject ?? null : null,
+      delayMinutes: input.kind === "DELAY" ? input.delayMinutes ?? 1440 : null,
+      conditionType: input.kind === "CONDITION" ? (input.conditionType as ConditionType) ?? null : null,
+    },
+  });
+  return { id: node.id };
+}
+
+/** Update an existing node's editable content. */
+export async function updateSequenceNode(nodeId: string, input: Partial<NodeInput>): Promise<void> {
+  const teamId = await getCurrentTeamId();
+  const node = await prisma.sequenceNode.findFirst({
+    where: { id: nodeId, sequence: { teamId } },
+  });
+  if (!node) return;
+  await prisma.sequenceNode.update({
+    where: { id: nodeId },
+    data: {
+      ...(input.messageBody !== undefined ? { messageBody: input.messageBody || null } : {}),
+      ...(input.messageSubject !== undefined ? { messageSubject: input.messageSubject || null } : {}),
+      ...(input.delayMinutes !== undefined ? { delayMinutes: input.delayMinutes } : {}),
+      ...(input.actionType !== undefined ? { actionType: (input.actionType as ActionType) ?? null } : {}),
+      ...(input.conditionType !== undefined
+        ? { conditionType: (input.conditionType as ConditionType) ?? null }
+        : {}),
+    },
+  });
+}
+
 export async function deleteSequenceNode(nodeId: string, sequenceId: string) {
   await prisma.sequenceNode.delete({ where: { id: nodeId } });
   revalidatePath(`/sequences/${sequenceId}`);
+}
+
+/** Persist node canvas positions (x/y) after a drag on the flow editor. */
+export async function updateNodePositions(
+  sequenceId: string,
+  positions: { id: string; x: number; y: number }[],
+) {
+  const teamId = await getCurrentTeamId();
+  const seq = await prisma.sequence.findFirst({ where: { id: sequenceId, teamId } });
+  if (!seq) return;
+  const owned = new Set(
+    (await prisma.sequenceNode.findMany({ where: { sequenceId }, select: { id: true } })).map(
+      (n) => n.id,
+    ),
+  );
+  await prisma.$transaction(
+    positions
+      .filter((p) => owned.has(p.id))
+      .map((p) =>
+        prisma.sequenceNode.update({ where: { id: p.id }, data: { posX: p.x, posY: p.y } }),
+      ),
+  );
+  // No revalidate: positions are cosmetic and the client already reflects them.
 }
 
 /** Persist a new node ordering from a drag-and-drop reorder. */

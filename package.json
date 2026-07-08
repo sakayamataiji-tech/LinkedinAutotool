@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
+    "@xyflow/react": "^12.11.2",
     "next": "^15.1.4",
     "playwright-core": "^1.49.1",
     "react": "^19.0.0",

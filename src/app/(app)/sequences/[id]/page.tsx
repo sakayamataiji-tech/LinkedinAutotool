@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentTeamId } from "@/lib/session";
 import { PageHeader } from "@/components/ui";
 import { sequenceVariantStats } from "@/lib/ab";
-import { SequenceCanvas, type CanvasNode } from "@/components/SequenceCanvas";
+import { FlowEditor, type EditorNode } from "@/components/flow/FlowEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -27,13 +27,16 @@ export default async function SequenceBuilderPage({ params }: { params: Promise<
   ]);
   const statsByNode = new Map(abStats.map((s) => [s.nodeId, s.variants]));
 
-  const canvasNodes: CanvasNode[] = sequence.nodes.map((node) => ({
+  const editorNodes: EditorNode[] = sequence.nodes.map((node) => ({
     id: node.id,
-    kind: node.kind as CanvasNode["kind"],
+    kind: node.kind as EditorNode["kind"],
     actionType: node.actionType,
     conditionType: node.conditionType,
     delayMinutes: node.delayMinutes,
     messageBody: node.messageBody,
+    posX: node.posX,
+    posY: node.posY,
+    order: node.order,
     variants: (statsByNode.get(node.id) ?? []).map((v) => ({
       id: v.id,
       label: v.label,
@@ -55,21 +58,19 @@ export default async function SequenceBuilderPage({ params }: { params: Promise<
       </div>
       <PageHeader
         title={sequence.name}
-        subtitle={sequence.description ?? "ドラッグ&ドロップで並べ替え・追加・削除ができます"}
+        subtitle="ノードをドラッグで配置・クリックで編集。＋からステップを追加できます。"
       />
 
-      <div className="mx-auto max-w-2xl">
-        <SequenceCanvas
-          sequenceId={sequence.id}
-          nodes={canvasNodes}
-          templates={templates.map((t) => ({
-            id: t.id,
-            name: t.name,
-            subject: t.subject,
-            body: t.body,
-          }))}
-        />
-      </div>
+      <FlowEditor
+        sequenceId={sequence.id}
+        nodes={editorNodes}
+        templates={templates.map((t) => ({
+          id: t.id,
+          name: t.name,
+          subject: t.subject,
+          body: t.body,
+        }))}
+      />
     </div>
   );
 }
