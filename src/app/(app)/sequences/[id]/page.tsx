@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentTeamId } from "@/lib/session";
 import { PageHeader } from "@/components/ui";
 import { sequenceVariantStats } from "@/lib/ab";
-import { FlowEditor, type EditorNode } from "@/components/flow/FlowEditor";
+import { SequenceTemplate, type TemplateStep } from "@/components/SequenceTemplate";
 
 export const dynamic = "force-dynamic";
 
@@ -21,22 +21,16 @@ export default async function SequenceBuilderPage({ params }: { params: Promise<
   });
   if (!sequence) notFound();
 
-  const [templates, abStats] = await Promise.all([
-    prisma.messageTemplate.findMany({ where: { teamId }, orderBy: { name: "asc" } }),
-    sequenceVariantStats(sequence.id),
-  ]);
+  const abStats = await sequenceVariantStats(sequence.id);
   const statsByNode = new Map(abStats.map((s) => [s.nodeId, s.variants]));
 
-  const editorNodes: EditorNode[] = sequence.nodes.map((node) => ({
+  const steps: TemplateStep[] = sequence.nodes.map((node) => ({
     id: node.id,
-    kind: node.kind as EditorNode["kind"],
+    kind: node.kind as TemplateStep["kind"],
     actionType: node.actionType,
     conditionType: node.conditionType,
     delayMinutes: node.delayMinutes,
     messageBody: node.messageBody,
-    posX: node.posX,
-    posY: node.posY,
-    order: node.order,
     variants: (statsByNode.get(node.id) ?? []).map((v) => ({
       id: v.id,
       label: v.label,
@@ -50,7 +44,7 @@ export default async function SequenceBuilderPage({ params }: { params: Promise<
   }));
 
   return (
-    <div>
+    <div className="mx-auto max-w-2xl">
       <div className="mb-2">
         <Link href="/sequences" className="text-xs text-slate-400 hover:text-slate-600">
           ← シーケンス一覧
@@ -58,19 +52,10 @@ export default async function SequenceBuilderPage({ params }: { params: Promise<
       </div>
       <PageHeader
         title={sequence.name}
-        subtitle="ノードをドラッグで配置・クリックで編集。＋からステップを追加できます。"
+        subtitle="送信される文面（メッセージ）を編集できます。ステップの流れは自動で設定済みです。"
       />
 
-      <FlowEditor
-        sequenceId={sequence.id}
-        nodes={editorNodes}
-        templates={templates.map((t) => ({
-          id: t.id,
-          name: t.name,
-          subject: t.subject,
-          body: t.body,
-        }))}
-      />
+      <SequenceTemplate steps={steps} />
     </div>
   );
 }
