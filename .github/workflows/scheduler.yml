@@ -1,0 +1,29 @@
+name: scheduler
+
+# Free alternative to Vercel Cron (Hobby plan allows only daily crons).
+# Calls the app's /api/cron/run every 10 minutes to advance sequences,
+# detect replies, and drain the webhook outbox.
+#
+# Setup: add two repository secrets (Settings → Secrets and variables → Actions):
+#   APP_URL      = https://<your-app>.vercel.app
+#   CRON_SECRET  = the same value set in Vercel
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger scheduler
+        run: |
+          if [ -z "${{ secrets.APP_URL }}" ]; then
+            echo "APP_URL secret not set yet — skipping."
+            exit 0
+          fi
+          curl -fsS -X POST "${{ secrets.APP_URL }}/api/cron/run" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            && echo "scheduler triggered" \
+            || echo "request failed (app not deployed yet?)"
