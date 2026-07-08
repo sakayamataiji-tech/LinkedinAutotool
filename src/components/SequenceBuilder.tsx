@@ -35,9 +35,11 @@ export interface TemplateOption {
 export function AddNodeForm({
   sequenceId,
   templates = [],
+  onAdded,
 }: {
   sequenceId: string;
   templates?: TemplateOption[];
+  onAdded?: () => void;
 }) {
   const [kind, setKind] = useState<"ACTION" | "DELAY" | "CONDITION">("ACTION");
   const [actionType, setActionType] = useState("CONNECT_REQUEST");
@@ -47,7 +49,14 @@ export function AddNodeForm({
 
   return (
     <form
-      action={(fd) => start(() => addSequenceNode(fd))}
+      action={(fd) =>
+        start(async () => {
+          await addSequenceNode(fd);
+          setBody("");
+          setSubject("");
+          onAdded?.();
+        })
+      }
       className="space-y-3"
     >
       <input type="hidden" name="sequenceId" value={sequenceId} />

@@ -101,6 +101,26 @@ export async function deleteSequenceNode(nodeId: string, sequenceId: string) {
   revalidatePath(`/sequences/${sequenceId}`);
 }
 
+/** Persist a new node ordering from a drag-and-drop reorder. */
+export async function reorderSequenceNodes(sequenceId: string, orderedIds: string[]) {
+  const teamId = await getCurrentTeamId();
+  const seq = await prisma.sequence.findFirst({ where: { id: sequenceId, teamId } });
+  if (!seq) return;
+  // Only reorder nodes that belong to this sequence.
+  const owned = new Set(
+    (await prisma.sequenceNode.findMany({ where: { sequenceId }, select: { id: true } })).map(
+      (n) => n.id,
+    ),
+  );
+  const ids = orderedIds.filter((id) => owned.has(id));
+  await prisma.$transaction(
+    ids.map((id, i) =>
+      prisma.sequenceNode.update({ where: { id }, data: { order: i, posY: i * 90 } }),
+    ),
+  );
+  revalidatePath(`/sequences/${sequenceId}`);
+}
+
 // --- Message templates -----------------------------------------------------
 
 export async function createTemplate(formData: FormData) {
