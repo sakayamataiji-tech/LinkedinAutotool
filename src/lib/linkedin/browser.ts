@@ -29,10 +29,12 @@ const USER_AGENT =
 async function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
     browserPromise = (async () => {
-      // webpackIgnore keeps this giant, node-only dep out of every bundle
-      // (including the edge-compiled instrumentation graph); it resolves at
-      // runtime from node_modules and only ever executes in Node.
-      const { chromium } = await import(/* webpackIgnore: true */ "playwright-core");
+      // The specifier is assembled at runtime (non-literal) so that NO static
+      // analyzer — webpack, Vercel's Edge validation, or @vercel/nft — can see
+      // this node-only package. It never loads in the Edge middleware; it is
+      // resolved from node_modules only when actually launching a browser (Node).
+      const mod = ["playwright", "core"].join("-");
+      const { chromium } = (await import(/* webpackIgnore: true */ mod)) as typeof import("playwright-core");
       return chromium.launch({
         headless: process.env.LINKEDIN_HEADFUL !== "true",
         executablePath: chromiumPath(),

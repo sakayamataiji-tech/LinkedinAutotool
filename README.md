@@ -28,7 +28,7 @@ LinkedIn上での営業・採用・リード獲得活動を効率化・自動化
 | 受信箱 | 会話一覧（未読 / 重要 / アーカイブ絞り込み）、スレッド表示、返信、重要マーク |
 | 設定 | 1日あたりのアクション上限、タイムゾーン / 稼働時間、連携アカウント、Webhook |
 | 実行エンジン | シーケンスグラフを1ノードずつ進行。アクション実行・条件評価・待機スケジュール・日次上限制御 |
-| 自動実行スケジューラ | 稼働中キャンペーンを自動進行。曜日ごとの稼働時間＋タイムゾーンを尊重。cronエンドポイント / インプロセス常駐 / ポーラーの3方式、手動「今すぐ実行」 |
+| 自動実行スケジューラ | 稼働中キャンペーンを自動進行。曜日ごとの稼働時間＋タイムゾーンを尊重。cronエンドポイント / 外部cron・GitHub Actions / ポーラーで起動、手動「今すぐ実行」 |
 | 返信検知・自動一時停止 | リードから返信が来たら自動でそのリードのシーケンスを停止（機械的な追撃を防止）。スケジューラが稼働時間に関係なく返信をポーリング。受信箱「返信あり」フィルタ、返信バッジ |
 | Webhook実配信 | イベント発生時に外部システムへ HMAC-SHA256 署名付きでPOST配信。タイムアウト＋リトライ、配信ログ記録、テスト送信、購読イベント選択、署名シークレット自動生成 |
 | メッセージテンプレート | 再利用可能な文面ライブラリ（種別・件名・本文）。シーケンス作成時に本文を挿入 |
@@ -114,8 +114,8 @@ LINKEDIN_DRY_RUN="true"                          # まずはドライラン推�
 
 | 方式 | 用途 | 設定 |
 | --- | --- | --- |
-| Cronエンドポイント | Vercel等のサーバーレス | `vercel.json` の cron が `/api/cron/run` を定期実行。`CRON_SECRET` で保護 |
-| インプロセス常駐 | `next start` / セルフホスト | `ENABLE_INPROCESS_SCHEDULER=true`（`SCHEDULER_INTERVAL_MS` で間隔調整） |
+| Vercel Cron | Vercel Pro | `vercel.json` に cron を定義し `/api/cron/run` を定期実行。`CRON_SECRET` で保護 |
+| GitHub Actions | 無料（Hobby含む） | `.github/workflows/scheduler.yml` が10分毎に `/api/cron/run` を叩く（repo secrets: `APP_URL` / `CRON_SECRET`） |
 | ポーラー | ローカル / 外部cron | `npm run scheduler`（`BASE_URL` / `CRON_SECRET` / `INTERVAL_SECONDS`） |
 
 - `/api/cron/run` は `Authorization: Bearer <CRON_SECRET>` または `?secret=` を要求（未設定時は開放）。
