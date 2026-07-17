@@ -16,7 +16,7 @@ export default async function TemplatesPage() {
     <div>
       <PageHeader
         title="メッセージテンプレート"
-        subtitle="再利用可能なメッセージ文面を管理。シーケンス作成時に挿入できます。"
+        subtitle="よく使うメッセージ文面を保存。メッセージの流れを作るときに挿入できます。"
       />
       <TemplateManager
         templates={templates.map((t) => ({

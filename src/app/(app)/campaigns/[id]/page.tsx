@@ -3,21 +3,12 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentTeamId } from "@/lib/session";
 import { computeCampaignMetrics, dailySeries } from "@/lib/metrics";
-import { Card, Stat, Badge, PageHeader } from "@/components/ui";
+import { Card, Stat, Badge, PageHeader, STATUS_LABELS } from "@/components/ui";
 import { CampaignControls } from "@/components/CampaignControls";
 import { AddLeads } from "@/components/AddLeads";
 import { DailyChart } from "@/components/DailyChart";
 
 export const dynamic = "force-dynamic";
-
-const STATUS_LABEL: Record<string, string> = {
-  PENDING: "待機中",
-  IN_PROGRESS: "進行中",
-  COMPLETED: "完了",
-  PAUSED: "一時停止",
-  FAILED: "失敗",
-  BLACKLISTED: "ブラックリスト",
-};
 
 export default async function CampaignDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -46,12 +37,12 @@ export default async function CampaignDetail({ params }: { params: Promise<{ id:
     <div>
       <div className="mb-2">
         <Link href="/campaigns" className="text-xs text-slate-400 hover:text-slate-600">
-          ← キャンペーン一覧
+          ← アプローチ施策の一覧
         </Link>
       </div>
       <PageHeader
         title={campaign.name}
-        subtitle={campaign.sequence ? `シーケンス: ${campaign.sequence.name}` : "シーケンス未設定"}
+        subtitle={campaign.sequence ? `メッセージの流れ: ${campaign.sequence.name}` : "メッセージの流れが未設定です"}
         action={<CampaignControls campaignId={campaign.id} status={campaign.status} />}
       />
 
@@ -62,7 +53,7 @@ export default async function CampaignDetail({ params }: { params: Promise<{ id:
             href={`/sequences/${campaign.sequence.id}`}
             className="text-xs text-brand-600 hover:underline"
           >
-            シーケンスを編集 →
+            メッセージの流れを編集 →
           </Link>
         ) : null}
       </div>
@@ -92,7 +83,7 @@ export default async function CampaignDetail({ params }: { params: Promise<{ id:
           <div className="space-y-2">
             {Object.entries(metrics.byStatus).map(([status, count]) => (
               <div key={status} className="flex items-center justify-between text-sm">
-                <span className="text-slate-500">{STATUS_LABEL[status] ?? status}</span>
+                <span className="text-slate-500">{STATUS_LABELS[status] ?? status}</span>
                 <span className="font-medium text-slate-800">{count}</span>
               </div>
             ))}

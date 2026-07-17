@@ -47,7 +47,7 @@ export default async function SequenceBuilderPage({ params }: { params: Promise<
     <div className="mx-auto max-w-2xl">
       <div className="mb-2">
         <Link href="/sequences" className="text-xs text-slate-400 hover:text-slate-600">
-          ← シーケンス一覧
+          ← メッセージの流れ一覧
         </Link>
       </div>
       <PageHeader

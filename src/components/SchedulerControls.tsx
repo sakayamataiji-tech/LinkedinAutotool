@@ -91,7 +91,7 @@ export function RunNowButton() {
           })
         }
       >
-        {pending ? "実行中…" : "今すぐ全キャンペーンを実行"}
+        {pending ? "実行中…" : "今すぐすべての施策を実行"}
       </button>
       {msg ? <span className="text-xs text-slate-500">{msg}</span> : null}
     </div>

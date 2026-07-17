@@ -42,23 +42,23 @@ export default async function DashboardPage() {
     <div>
       <PageHeader
         title="ダッシュボード"
-        subtitle="全キャンペーン横断の成果サマリー"
+        subtitle="すべてのアプローチ施策をまとめた成果サマリー"
       />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat label="リード総数" value={leadCount} />
-        <Stat label="稼働中キャンペーン" value={activeCampaigns} sub={`全 ${campaigns.length} 件`} />
+        <Stat label="実行中の施策" value={activeCampaigns} sub={`全 ${campaigns.length} 件`} />
         <Stat label="接続承認率" value={pct(acceptanceRate)} sub={`${connAccepted} / ${connSent}`} />
         <Stat label="返信率" value={pct(replyRate)} sub={`${replies} / ${msgSent}`} />
       </div>
 
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <h2 className="mb-3 text-sm font-semibold text-slate-700">キャンペーン</h2>
+          <h2 className="mb-3 text-sm font-semibold text-slate-700">アプローチ施策</h2>
           <Card>
             {campaigns.length === 0 ? (
               <div className="p-6 text-sm text-slate-400">
-                キャンペーンがありません。
+                アプローチ施策がありません。
                 <Link href="/campaigns" className="ml-1 text-brand-600 hover:underline">
                   作成する
                 </Link>

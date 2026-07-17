@@ -6,9 +6,9 @@ import { usePathname } from "next/navigation";
 const NAV = [
   { href: "/", label: "ダッシュボード", icon: "▚" },
   { href: "/analytics", label: "分析", icon: "▨" },
-  { href: "/campaigns", label: "キャンペーン", icon: "◎" },
+  { href: "/campaigns", label: "アプローチ施策", icon: "◎" },
   { href: "/leads", label: "リード管理", icon: "☰" },
-  { href: "/sequences", label: "シーケンス", icon: "⇄" },
+  { href: "/sequences", label: "メッセージの流れ", icon: "⇄" },
   { href: "/templates", label: "テンプレート", icon: "▤" },
   { href: "/inbox", label: "受信箱", icon: "✉" },
   { href: "/settings", label: "設定", icon: "⚙" },

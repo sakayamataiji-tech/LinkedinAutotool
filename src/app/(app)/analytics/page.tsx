@@ -83,16 +83,16 @@ export default async function AnalyticsPage({
       </div>
 
       <div className="mt-6">
-        <h2 className="mb-3 text-sm font-semibold text-slate-700">キャンペーン比較</h2>
+        <h2 className="mb-3 text-sm font-semibold text-slate-700">アプローチ施策の比較</h2>
         <Card>
           {a.campaigns.length === 0 ? (
-            <div className="p-6 text-sm text-slate-400">キャンペーンがありません。</div>
+            <div className="p-6 text-sm text-slate-400">アプローチ施策がありません。</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
-                    <th className="px-4 py-2 font-medium">キャンペーン</th>
+                    <th className="px-4 py-2 font-medium">アプローチ施策</th>
                     <th className="px-4 py-2 font-medium">状態</th>
                     <th className="px-4 py-2 font-medium">リード</th>
                     <th className="px-4 py-2 font-medium">接続送信</th>
@@ -132,7 +132,7 @@ export default async function AnalyticsPage({
               <table className="w-full min-w-[560px] text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
-                    <th className="px-4 py-2 font-medium">シーケンス</th>
+                    <th className="px-4 py-2 font-medium">メッセージの流れ</th>
                     <th className="px-4 py-2 font-medium">ステップ</th>
                     <th className="px-4 py-2 font-medium">バリアント</th>
                     <th className="px-4 py-2 font-medium">送信</th>

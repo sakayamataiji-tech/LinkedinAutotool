@@ -14,7 +14,7 @@ export default async function NewTeamPage() {
         <div className="card p-6">
           <h1 className="mb-1 text-lg font-semibold text-slate-900">新しいチームを作成</h1>
           <p className="mb-5 text-sm text-slate-500">
-            チームごとにキャンペーン・リード・受信箱が分離されます。
+            チームごとにアプローチ施策・リード・受信箱が分離されます。
           </p>
           <form action={createTeamAction} className="space-y-3">
             <div>

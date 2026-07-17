@@ -22,19 +22,19 @@ export default async function CampaignsPage() {
 
   return (
     <div>
-      <PageHeader title="キャンペーン" subtitle="アウトリーチ施策の管理" />
+      <PageHeader title="アプローチ施策" subtitle="誰に・どんな流れでアプローチするかをまとめて管理します" />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
           {campaigns.length === 0 ? (
-            <EmptyState title="キャンペーンがありません" hint="右のフォームから作成できます" />
+            <EmptyState title="アプローチ施策がありません" hint="右のフォームから作成できます" />
           ) : (
             <Card>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 text-left text-xs text-slate-400">
                     <th className="px-4 py-2 font-medium">名前</th>
-                    <th className="px-4 py-2 font-medium">シーケンス</th>
+                    <th className="px-4 py-2 font-medium">メッセージの流れ</th>
                     <th className="px-4 py-2 font-medium">状態</th>
                     <th className="px-4 py-2 font-medium">リード</th>
                   </tr>
@@ -65,7 +65,7 @@ export default async function CampaignsPage() {
 
         <div>
           <Card className="p-5">
-            <h2 className="mb-4 text-sm font-semibold text-slate-700">新規キャンペーン</h2>
+            <h2 className="mb-4 text-sm font-semibold text-slate-700">新しいアプローチ施策</h2>
             <form action={createCampaign} className="space-y-3">
               <div>
                 <label className="label">名前</label>
@@ -76,7 +76,7 @@ export default async function CampaignsPage() {
                 <input name="description" className="input" placeholder="任意" />
               </div>
               <div>
-                <label className="label">シーケンス</label>
+                <label className="label">メッセージの流れ</label>
                 <select name="sequenceId" className="input">
                   <option value="">未選択</option>
                   {sequences.map((s) => (

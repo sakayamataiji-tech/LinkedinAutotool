@@ -50,7 +50,7 @@ function Options({ campaigns }: { campaigns: Campaign[] }) {
         <input name="tags" className="input" placeholder="SaaS, ホット" />
       </div>
       <div>
-        <label className="label">キャンペーンに登録（任意）</label>
+        <label className="label">アプローチ施策に登録（任意）</label>
         <select name="campaignId" className="input">
           <option value="">登録しない</option>
           {campaigns.map((c) => (

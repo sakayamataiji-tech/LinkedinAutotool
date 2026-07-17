@@ -16,12 +16,12 @@ export default async function SequencesPage() {
 
   return (
     <div>
-      <PageHeader title="シーケンス" subtitle="ビジュアル形式のアウトリーチフロー" />
+      <PageHeader title="メッセージの流れ" subtitle="接続リクエストからメッセージ・フォローまでの送信ステップです" />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
           {sequences.length === 0 ? (
-            <EmptyState title="シーケンスがありません" hint="右のフォームから作成できます" />
+            <EmptyState title="メッセージの流れがありません" hint="右のフォームから作成できます" />
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {sequences.map((s) => (
@@ -51,7 +51,7 @@ export default async function SequencesPage() {
 
         <div>
           <Card className="p-5">
-            <h2 className="mb-4 text-sm font-semibold text-slate-700">新規シーケンス</h2>
+            <h2 className="mb-4 text-sm font-semibold text-slate-700">新しいメッセージの流れ</h2>
             <form action={createSequence} className="space-y-3">
               <div>
                 <label className="label">名前</label>

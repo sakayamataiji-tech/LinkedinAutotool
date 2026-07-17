@@ -102,9 +102,9 @@ export default async function LeadDetail({ params }: { params: Promise<{ id: str
 
         <div className="space-y-6 lg:col-span-2">
           <Card className="p-5">
-            <h2 className="mb-3 text-sm font-semibold text-slate-700">キャンペーン進捗履歴</h2>
+            <h2 className="mb-3 text-sm font-semibold text-slate-700">アプローチ施策の進捗履歴</h2>
             {lead.campaignLeads.length === 0 ? (
-              <p className="text-sm text-slate-400">まだキャンペーンに登録されていません。</p>
+              <p className="text-sm text-slate-400">まだアプローチ施策に登録されていません。</p>
             ) : (
               <div className="space-y-2">
                 {lead.campaignLeads.map((cl) => (

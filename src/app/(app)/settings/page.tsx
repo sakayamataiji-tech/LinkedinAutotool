@@ -146,7 +146,7 @@ export default async function SettingsPage() {
           <div>
             <h2 className="text-sm font-semibold text-slate-700">自動実行スケジューラ</h2>
             <p className="mt-1 text-xs text-slate-400">
-              稼働中キャンペーンを稼働時間内で自動進行します。手動で今すぐ実行することもできます。
+              実行中のアプローチ施策を稼働時間内で自動的に進めます。手動で今すぐ実行することもできます。
             </p>
           </div>
           <span
