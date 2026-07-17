@@ -19,13 +19,21 @@ LinkedIn上での営業・採用・リード獲得活動を効率化・自動化
 
 | 領域 | 内容 |
 | --- | --- |
+| 認証・マルチテナント | メール/パスワードのサインアップ・ログイン・ログアウト、DBセッション＋httpOnly Cookie、チーム切替、テナント分離、メンバー招待 |
 | ダッシュボード | 全キャンペーン横断の接続承認率・返信率・リード数・最近のアクティビティ |
 | キャンペーン管理 | 作成 / 実行 / 一時停止・再開、ステータス内訳、日次推移グラフ、CSVエクスポート |
+| リード取り込み | CSVアップロード（列自動マッピング・テンプレート配布）、プロフィールURL貼り付け、各種ソース（LinkedIn検索/Sales Navigator/Recruiter/イベント参加者/いいね・コメントユーザー/1次接続）からの取り込み。氏名クリーニング・重複排除・タグ付与・キャンペーン登録に対応 |
 | リード管理（簡易CRM） | 検索・タグ絞り込み、プロフィール情報、メモ、ブラックリスト、キャンペーン進捗履歴、アクティビティ履歴 |
 | シーケンスビルダー | アクション / 待機 / 条件分岐ノードを積み上げるビジュアルフロー、テンプレート保存 |
 | 受信箱 | 会話一覧（未読 / 重要 / アーカイブ絞り込み）、スレッド表示、返信、重要マーク |
 | 設定 | 1日あたりのアクション上限、タイムゾーン / 稼働時間、連携アカウント、Webhook |
 | 実行エンジン | シーケンスグラフを1ノードずつ進行。アクション実行・条件評価・待機スケジュール・日次上限制御 |
+| 自動実行スケジューラ | 稼働中キャンペーンを自動進行。曜日ごとの稼働時間＋タイムゾーンを尊重。cronエンドポイント / 外部cron・GitHub Actions / ポーラーで起動、手動「今すぐ実行」 |
+| 返信検知・自動一時停止 | リードから返信が来たら自動でそのリードのシーケンスを停止（機械的な追撃を防止）。スケジューラが稼働時間に関係なく返信をポーリング。受信箱「返信あり」フィルタ、返信バッジ |
+| Webhook実配信 | イベント発生時に外部システムへ HMAC-SHA256 署名付きでPOST配信。タイムアウト＋リトライ、配信ログ記録、テスト送信、購読イベント選択、署名シークレット自動生成 |
+| メッセージテンプレート | 再利用可能な文面ライブラリ（種別・件名・本文）。シーケンス作成時に本文を挿入 |
+| A/Bテスト | メッセージノードに複数バリアントを設定し、リードごとに決定論的（重み付き）に均等割当。送信メッセージにバリアントを記録し、バリアント別の送信数・返信率を計測 |
+| 分析ダッシュボード | 期間指定（7/14/30/90日）、日次トレンド（接続/メッセージ/返信）、ファネル（対象→接続→メッセージ→返信）、チャネル別・アクション別内訳、キャンペーン比較、A/Bバリアント比較、CSVエクスポート |
 
 ### 対応アクション / 条件
 
@@ -37,29 +45,104 @@ LinkedIn上での営業・採用・リード獲得活動を効率化・自動化
 
 ```
 src/
-├── app/                    # App Router のページ & API ルート
-│   ├── page.tsx            # ダッシュボード
-│   ├── campaigns/          # キャンペーン一覧・詳細 + CSVエクスポートAPI
-│   ├── leads/              # リードCRM 一覧・詳細
-│   ├── sequences/          # シーケンス一覧・ビルダー
-│   ├── inbox/              # 受信箱
-│   └── settings/           # 設定
+├── middleware.ts           # 認証ガード（Cookie有無でリダイレクト、Edge）
+├── app/
+│   ├── layout.tsx          # ルートレイアウト（html/body）
+│   ├── (auth)/             # 未認証向け: /login, /signup
+│   ├── (app)/              # 認証必須（サイドバー＋上部バー）
+│   │   ├── layout.tsx      # requireAuth() ＋ チーム切替バー
+│   │   ├── page.tsx        # ダッシュボード
+│   │   ├── campaigns/      # キャンペーン一覧・詳細
+│   │   ├── leads/          # リードCRM 一覧・詳細
+│   │   ├── sequences/      # シーケンス一覧・ビルダー
+│   │   ├── inbox/          # 受信箱
+│   │   └── settings/       # 設定（上限/連携/Webhook/メンバー）
+│   ├── teams/new/          # チーム作成
+│   └── api/                # CSVエクスポート等
 ├── components/             # UIコンポーネント（サーバー/クライアント）
 └── lib/
     ├── prisma.ts           # Prisma クライアント
-    ├── session.ts          # 現在のチーム解決（認証は今後）
+    ├── session.ts          # 認証必須化＋現在チーム解決（テナント分離の要）
     ├── actions.ts          # Server Actions（各種ミューテーション）
     ├── engine.ts           # シーケンス実行エンジン
     ├── metrics.ts          # 成果指標・日次推移の集計
     ├── text.ts             # 敬称/学位/絵文字の除去・テンプレート差し込み
+    ├── auth/               # 認証層
+    │   ├── password.ts     # scrypt ハッシュ/検証
+    │   ├── session.ts      # セッション/Cookie 管理
+    │   └── actions.ts      # signup/login/logout/switchTeam/invite
     └── linkedin/           # 差し替え可能なプロバイダ層
         ├── provider.ts     # LinkedInProvider インターフェース
         ├── mock.ts         # モック実装（決定論的な擬似結果）
         └── index.ts        # getProvider()
 ```
 
-**プロバイダ差し替え**: `src/lib/linkedin/index.ts` の `getProvider()` を実装差し替えするだけで、
-ブラウザ自動化や外部API連携などの本番プロバイダに移行できます（エンジン・UIは無変更）。
+**プロバイダ差し替え**: `LINKEDIN_PROVIDER` 環境変数で切り替えます。`mock`（既定・アカウント不要の
+決定論シミュレーション）と `playwright`（実際のLinkedInブラウザ自動化）。エンジン・UIは無変更。
+
+## 本番 LinkedIn プロバイダ（Playwright）
+
+> ⚠️ **重要**: LinkedInの自動操作はLinkedInの利用規約（User Agreement）に抵触し、**アカウントの
+> 制限・永久BAN**につながる可能性があります。利用は自己責任で、**自分のアカウント**に対してのみ、
+> 保守的な量で行ってください。日次上限・稼働時間・人間らしい間隔（実装済み）を必ず有効にしてください。
+
+`src/lib/linkedin/playwright.ts` が `LinkedInProvider` を実装します。認証はパスワードではなく、
+自分のセッションCookie **`li_at`** を使用します（`browser.ts` がChromiumに注入）。
+
+### セットアップ
+
+```bash
+# .env
+LINKEDIN_PROVIDER="playwright"
+LINKEDIN_LI_AT="<ブラウザのlinkedin.comから取得したli_atクッキー値>"
+PLAYWRIGHT_CHROMIUM_PATH="/path/to/chromium"   # 任意（未指定ならplaywright-core既定）
+LINKEDIN_DRY_RUN="true"                          # まずはドライラン推奨（クリックせず遷移のみ）
+```
+
+- **対応アクション**: プロフィール閲覧 / 接続リクエスト / メッセージ / フォロー / いいね。
+  未対応（InMail・スキル推薦・メール検索・メール送信）は安全にスキップしてシーケンスを継続。
+- **条件**: `IS_CONNECTED` を実装（1次接続の判定）。他はベストエフォート。
+- **設計上の注意**: LinkedInのDOMは頻繁に変わるため、**セレクタは実環境で要検証**です。各アクションは
+  例外を捕捉し、失敗時はエンジンにログされます。`LINKEDIN_DRY_RUN=true` で遷移・読み取りのみ実行できます。
+- `playwright-core` は動的import（`webpackIgnore`）で読み込むため、バンドルには含まれず Node 実行時のみ
+  ロードされます。ブラウザ本体は別途用意が必要です。
+
+## 自動実行スケジューラ
+
+稼働中キャンペーンを、各チームの**タイムゾーン**と**曜日ごとの稼働時間**の範囲内で自動進行します
+（`src/lib/schedule.ts`）。3通りの起動方式に対応：
+
+| 方式 | 用途 | 設定 |
+| --- | --- | --- |
+| Vercel Cron | Vercel Pro | `vercel.json` に cron を定義し `/api/cron/run` を定期実行。`CRON_SECRET` で保護 |
+| GitHub Actions | 無料（Hobby含む） | `.github/workflows/scheduler.yml` が10分毎に `/api/cron/run` を叩く（repo secrets: `APP_URL` / `CRON_SECRET`） |
+| ポーラー | ローカル / 外部cron | `npm run scheduler`（`BASE_URL` / `CRON_SECRET` / `INTERVAL_SECONDS`） |
+
+- `/api/cron/run` は `Authorization: Bearer <CRON_SECRET>` または `?secret=` を要求（未設定時は開放）。
+- `?force=1` で稼働時間を無視して即実行。設定画面の「今すぐ全キャンペーンを実行」も同様。
+
+### 並行実行の安全性（二重処理防止）
+
+エンジンはリードを処理する前に **`SELECT … FOR UPDATE SKIP LOCKED`** でアトミックに確保
+（`CampaignLead.lockedAt` を刻む）します。これにより **複数のワーカー/インスタンスを同時に動かしても
+同じリードを二重処理（＝二重送信）しません**。クラッシュ等で放置されたロックは TTL（5分）経過後に
+自動で再取得可能になります。将来キュー＋ワーカーへ増強する際、この排他制御がそのまま効きます。
+
+## Webhook
+
+イベント発生時に登録済みWebhookへ署名付きでPOSTします（`src/lib/webhooks.ts`）。
+
+- **イベント**: `connection.accepted` / `message.sent` / `message.replied` / `campaignLead.completed`
+  （購読リスト空 = 全イベント）。テスト送信は `ping`。
+- **署名**: `X-LA-Signature: sha256=<hex>` ヘッダ（Web Crypto の HMAC-SHA256、Webhookごとの
+  シークレット）。受信側は body と共有シークレットで検証可能。
+- **非同期配信（アウトボックス）**: イベント発生時は `WebhookJob`（キュー）へ**即時登録するだけ**で、
+  シーケンスエンジンはHTTPを待ちません。配信はスケジューラが `drainWebhookJobs()` で後追い実行します。
+  DB永続なので**再起動でも失われず**、遅い/落ちている受信先がエンジンをブロックしません。
+- **配送**: 5秒タイムアウト。失敗はキューで**指数バックオフ**（1→2→4…分）で再試行し、最大回数で
+  `failed`。各試行を `WebhookDelivery` に記録し、設定画面に「最近の配信」として表示。
+- **並行安全**: ドレイナは `FOR UPDATE SKIP LOCKED` でジョブを確保するため、複数ワーカーでも二重配信しません。
+- その他ヘッダ: `X-LA-Event`, `X-LA-Delivery`（配信ID）。テスト送信のみ即時同期配信。
 
 ## セットアップ
 
@@ -82,6 +165,24 @@ npm run dev
 # http://localhost:3000
 ```
 
+### デモログイン
+
+シード投入後、以下でログインできます（未認証は自動的に `/login` へリダイレクト）。
+
+- **Email**: `sakayama.taiji@zeeta.co.jp` / **Password**: `password123`（2チームに所属）
+- **Email**: `member@zeeta.co.jp` / **Password**: `password123`
+
+## 認証・マルチテナント
+
+- **認証**: メール/パスワード。パスワードは Node 標準 `crypto` の scrypt でハッシュ化（外部依存なし）。
+  サーバー側 `Session` テーブルを httpOnly Cookie で参照。
+- **ガード**: `middleware.ts` が Cookie 有無で `/login` 等へ振り分け（Edge）。実際の検証は
+  各ページ/アクションの `requireAuth()` がサーバー側で実施。
+- **マルチテナント**: ユーザーは `Membership` で複数チームに所属。`getCurrentTeam()` がセッションの
+  `activeTeamId` から現在のチームを解決し、**全データクエリを `teamId` で分離**。上部バーの
+  チーム切替でアクティブチームを変更でき、切替後は別チームのデータが一切表示されない（分離を確認済み）。
+- **メンバー**: 設定画面から登録済みユーザーをメール招待（MVPでは既存ユーザーの紐付け）。
+
 ## 動作確認済みの主要フロー
 
 - 全ページ（ダッシュボード / キャンペーン / リード / シーケンス / 受信箱 / 設定）がレンダリング
@@ -90,10 +191,20 @@ npm run dev
 - 日次上限（DailyLimit）によるアクション数の制御
 - CSV エクスポート
 
+## A/Bテスト
+
+メッセージノード（MESSAGE / INMAIL / SEND_EMAIL）に `MessageVariant`（A/B/C…、重み付き）を
+設定すると、各リードは `hash(leadId + nodeId)` により重み付きで**決定論的に**バリアントへ割り当て
+られます（同じリードは常に同じバリアント）。送信された `Message` に `variantId` を記録し、
+`src/lib/ab.ts` の `sequenceVariantStats()` がバリアント別の送信数・返信数・返信率を集計して
+ビルダーに表示します（`src/lib/engine.ts` の `pickVariant`）。
+
 ## 今後の拡張ポイント
 
-- 認証・マルチテナント（現状は最初のチームを暗黙選択）
-- 本番 LinkedIn プロバイダ実装
+- Playwrightプロバイダのセレクタ整備・checkReply/未対応アクションの実装、チームごとの `li_at` 保管
+- 各ソースからの実データ取り込み（現状は検索系がモック生成）
+- CSV取り込みの列マッピングを手動調整するプレビュー画面
+- A/Bテストの統計的有意差判定（現状は素の返信率比較）
 - バックグラウンドスケジューラ（cron / queue）による自動実行
 - リード取り込み（各種ソース連携・CSVアップロードUI）
 - Webhook 配信の実処理、稼働時間ウィンドウの実行時判定

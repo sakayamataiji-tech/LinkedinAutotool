@@ -33,11 +33,23 @@ const STATUS_COLORS: Record<string, string> = {
   BLACKLISTED: "bg-zinc-800 text-white",
 };
 
+// 英語のステータスコードを分かりやすい日本語で表示する
+export const STATUS_LABELS: Record<string, string> = {
+  DRAFT: "下書き",
+  RUNNING: "実行中",
+  PAUSED: "一時停止",
+  COMPLETED: "完了",
+  PENDING: "待機中",
+  IN_PROGRESS: "進行中",
+  FAILED: "失敗",
+  BLACKLISTED: "対象外",
+};
+
 export function Badge({ children }: { children: string }) {
   const cls = STATUS_COLORS[children] ?? "bg-slate-100 text-slate-600";
   return (
     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
-      {children}
+      {STATUS_LABELS[children] ?? children}
     </span>
   );
 }

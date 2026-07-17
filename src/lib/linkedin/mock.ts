@@ -2,8 +2,17 @@ import type {
   ActionRequest,
   ActionResult,
   ConditionRequest,
+  LeadContext,
   LinkedInProvider,
+  ReplyCheck,
 } from "./provider";
+
+const REPLY_TEMPLATES = [
+  "ご連絡ありがとうございます。ぜひ詳しく伺いたいです。",
+  "興味があります。来週あたりで打ち合わせ可能でしょうか？",
+  "ありがとうございます。資料を送っていただけますか？",
+  "現在は検討していませんが、また折を見てご連絡します。",
+];
 
 /**
  * Deterministic mock provider.
@@ -98,6 +107,16 @@ export class MockLinkedInProvider implements LinkedInProvider {
       default:
         return { ok: false, detail: "未対応のアクション" };
     }
+  }
+
+  async checkReply(lead: LeadContext): Promise<ReplyCheck> {
+    // ~35% of messaged leads reply in the mock world.
+    const roll = this.hash(lead.leadId + "reply");
+    if (roll < 0.35) {
+      const idx = Math.floor(this.hash(lead.leadId + "tmpl") * REPLY_TEMPLATES.length);
+      return { replied: true, body: REPLY_TEMPLATES[idx] ?? REPLY_TEMPLATES[0], channel: "linkedin" };
+    }
+    return { replied: false };
   }
 
   async evaluate(req: ConditionRequest): Promise<boolean> {

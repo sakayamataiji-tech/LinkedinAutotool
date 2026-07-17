@@ -7,7 +7,11 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // Runtime uses the pooled connection (Neon pooler / PgBouncer) for serverless.
+  url = env("DATABASE_URL")
+  // Migrations use a direct (non-pooled) connection. Locally set DIRECT_URL
+  // equal to DATABASE_URL.
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------------------
@@ -30,17 +34,48 @@ model Team {
   webhooks    Webhook[]
   limits      DailyLimit?
   activities  ActivityLog[] @relation("teamActivities")
+  templates   MessageTemplate[]
 }
 
-model User {
+// Reusable message template library (メッセージテンプレート管理).
+model MessageTemplate {
   id        String   @id @default(cuid())
-  email     String   @unique
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId    String
   name      String
-  avatarUrl String?
+  category  String   @default("message") // message | inmail | email
+  subject   String?
+  body      String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([teamId])
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String?
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
   memberships Membership[]
+  sessions    Session[]
+}
+
+// Server-side session backing an httpOnly cookie.
+model Session {
+  id           String   @id @default(cuid())
+  token        String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  activeTeamId String? // currently selected team (must be one the user belongs to)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
 }
 
 enum TeamRole {
@@ -223,7 +258,26 @@ model SequenceNode {
   posX Float @default(0)
   posY Float @default(0)
 
+  variants MessageVariant[]
+
   @@index([sequenceId])
+}
+
+// A/B test variant for a message node. When a node has variants, each lead is
+// assigned one deterministically (weighted) and the variant's body is sent.
+model MessageVariant {
+  id        String   @id @default(cuid())
+  node      SequenceNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  nodeId    String
+  label     String // "A", "B", ...
+  subject   String?
+  body      String
+  weight    Int      @default(1)
+  createdAt DateTime @default(now())
+
+  messages Message[]
+
+  @@index([nodeId])
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +336,11 @@ model CampaignLead {
   connectionAccepted Boolean @default(false)
   replied            Boolean @default(false)
 
+  // Claim lock: set when a worker is processing this lead. Concurrent workers
+  // skip locked rows (SELECT ... FOR UPDATE SKIP LOCKED); stale locks past the
+  // TTL are reclaimable so a crashed worker doesn't strand a lead.
+  lockedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -290,6 +349,7 @@ model CampaignLead {
   @@unique([campaignId, leadId])
   @@index([status])
   @@index([nextRunAt])
+  @@index([lockedAt])
 }
 
 // Rolled-up daily metrics per campaign (日次推移のグラフ表示)
@@ -346,7 +406,12 @@ model Message {
   seen           Boolean          @default(false) // whether the recipient has seen it
   sentAt         DateTime         @default(now())
 
+  // A/B test attribution: which variant produced this outbound message.
+  variant   MessageVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  variantId String?
+
   @@index([conversationId])
+  @@index([variantId])
 }
 
 // ---------------------------------------------------------------------------
@@ -405,7 +470,48 @@ model Webhook {
   team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
   teamId    String
   url       String
-  events    String[] // e.g. ["connection.accepted", "message.replied"]
+  events    String[] // subscribed events; empty = all
   active    Boolean  @default(true)
+  secret    String? // HMAC-SHA256 signing secret
   createdAt DateTime @default(now())
+
+  deliveries WebhookDelivery[]
+  jobs       WebhookJob[]
+}
+
+// Durable outbox: events are enqueued instantly (engine never blocks on HTTP),
+// then a drainer delivers them asynchronously with retry/backoff.
+model WebhookJob {
+  id            String    @id @default(cuid())
+  webhook       Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  webhookId     String
+  event         String
+  payload       Json
+  status        String    @default("pending") // pending | delivered | failed
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?
+  lockedAt      DateTime? // claimed by a drainer (SKIP LOCKED)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([lockedAt])
+}
+
+// Record of a single webhook delivery attempt.
+model WebhookDelivery {
+  id         String   @id @default(cuid())
+  webhook    Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  webhookId  String
+  event      String
+  url        String
+  statusCode Int?
+  success    Boolean  @default(false)
+  attempts   Int      @default(1)
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([webhookId])
+  @@index([createdAt])
 }

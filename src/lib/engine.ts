@@ -1,7 +1,24 @@
-import type { ActionType, Prisma, SequenceNode } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { ActionType, SequenceNode } from "@prisma/client";
 import { prisma } from "./prisma";
 import { getProvider, type LeadContext } from "./linkedin";
 import { renderTemplate } from "./text";
+import { dispatchWebhookEvent } from "./webhooks";
+
+/** Compact lead payload included in webhook events. */
+function leadEventPayload(cl: {
+  campaignId: string;
+  leadId: string;
+  lead: { firstName: string; lastName: string; company: string | null; email: string | null };
+}) {
+  return {
+    campaignId: cl.campaignId,
+    leadId: cl.leadId,
+    name: `${cl.lead.firstName} ${cl.lead.lastName}`.trim(),
+    company: cl.lead.company,
+    email: cl.lead.email,
+  };
+}
 
 /**
  * Sequence execution engine.
@@ -111,13 +128,34 @@ function toLeadContext(lead: {
   };
 }
 
-function nextByOrder(nodes: SequenceNode[], current: SequenceNode): SequenceNode | null {
+/** Stable hash of a string to [0,1). */
+function hashFraction(seed: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 100000) / 100000;
+}
+
+/** Weighted deterministic variant selection for A/B testing. */
+function pickVariant<T extends { weight: number }>(variants: T[], seed: string): T {
+  const total = variants.reduce((s, v) => s + Math.max(1, v.weight), 0);
+  let r = hashFraction(seed) * total;
+  for (const v of variants) {
+    r -= Math.max(1, v.weight);
+    if (r < 0) return v;
+  }
+  return variants[variants.length - 1];
+}
+
+function nextByOrder<T extends SequenceNode>(nodes: T[], current: T): T | null {
   const sorted = [...nodes].sort((a, b) => a.order - b.order);
   const idx = sorted.findIndex((n) => n.id === current.id);
   return sorted[idx + 1] ?? null;
 }
 
-function nodeById(nodes: SequenceNode[], id: string | null): SequenceNode | null {
+function nodeById<T extends SequenceNode>(nodes: T[], id: string | null): T | null {
   if (!id) return null;
   return nodes.find((n) => n.id === id) ?? null;
 }
@@ -137,7 +175,9 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
     where: { id: campaignLeadId },
     include: {
       lead: true,
-      campaign: { include: { sequence: { include: { nodes: true } } } },
+      campaign: {
+        include: { sequence: { include: { nodes: { include: { variants: true } } } } },
+      },
     },
   });
 
@@ -150,6 +190,14 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
       data: { status: "BLACKLISTED" },
     });
     return { campaignLeadId, processed: false, reason: "blacklisted" };
+  }
+  // Safety net: never keep automating a lead who has already replied.
+  if (cl.replied) {
+    await prisma.campaignLead.update({
+      where: { id: cl.id },
+      data: { status: "PAUSED", nextRunAt: null },
+    });
+    return { campaignLeadId, processed: false, reason: "replied" };
   }
 
   const nodes = cl.campaign.sequence?.nodes ?? [];
@@ -184,6 +232,7 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
         nextRunAt: next ? new Date(Date.now() + minutes * 60_000) : null,
       },
     });
+    if (!next) await dispatchWebhookEvent(teamId, "campaignLead.completed", leadEventPayload(cl));
     return { campaignLeadId, processed: true, reason: `delay_${minutes}m` };
   }
 
@@ -214,6 +263,7 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
         nextRunAt: null,
       },
     });
+    if (!next) await dispatchWebhookEvent(teamId, "campaignLead.completed", leadEventPayload(cl));
     return { campaignLeadId, processed: true, reason: `condition_${result}` };
   }
 
@@ -224,8 +274,22 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
     return { campaignLeadId, processed: false, reason: "daily_limit" };
   }
 
-  const body = current.messageBody
-    ? renderTemplate(current.messageBody, {
+  // A/B testing: when a message node has variants, assign this lead one
+  // deterministically (stable per lead+node), and send that variant's body.
+  const isMessageAction =
+    actionType === "MESSAGE" || actionType === "INMAIL" || actionType === "SEND_EMAIL";
+  let rawBody = current.messageBody;
+  let rawSubject = current.messageSubject;
+  let chosenVariantId: string | null = null;
+  if (isMessageAction && current.variants && current.variants.length > 0) {
+    const variant = pickVariant(current.variants, cl.leadId + current.id);
+    chosenVariantId = variant.id;
+    rawBody = variant.body;
+    rawSubject = variant.subject;
+  }
+
+  const body = rawBody
+    ? renderTemplate(rawBody, {
         firstName: cl.lead.firstName,
         lastName: cl.lead.lastName,
         company: cl.lead.company,
@@ -237,7 +301,7 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
     actionType,
     lead: toLeadContext(cl.lead),
     body,
-    subject: current.messageSubject ?? undefined,
+    subject: rawSubject ?? undefined,
   });
 
   // Persist lead-side effects.
@@ -272,6 +336,7 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
         conversationId: convo.id,
         direction: "OUTBOUND",
         body: result.message.body,
+        variantId: chosenVariantId,
       },
     });
   }
@@ -292,6 +357,7 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
     actionType === "CONNECT_REQUEST" && result.patch?.isConnected === true;
 
   const next = nextByOrder(nodes, current);
+  const completed = result.ok && !next;
   await prisma.campaignLead.update({
     where: { id: cl.id },
     data: {
@@ -302,13 +368,69 @@ export async function stepCampaignLead(campaignLeadId: string): Promise<StepOutc
     },
   });
 
+  // Fire webhooks for the events this action produced.
+  const payload = leadEventPayload(cl);
+  if (connectionAccepted) await dispatchWebhookEvent(teamId, "connection.accepted", payload);
+  if (result.message && result.ok)
+    await dispatchWebhookEvent(teamId, "message.sent", {
+      ...payload,
+      channel: result.message.channel,
+    });
+  if (completed) await dispatchWebhookEvent(teamId, "campaignLead.completed", payload);
+
   return { campaignLeadId, processed: true, reason: result.detail };
+}
+
+// A lock is considered stale (reclaimable) after this long — protects against
+// a worker that crashed mid-processing without releasing its claim.
+const LOCK_TTL_MINUTES = 5;
+
+/**
+ * Atomically claim up to `limit` due campaign leads so no two workers ever
+ * process the same lead. Uses `FOR UPDATE SKIP LOCKED`: concurrent claimers
+ * skip rows another transaction is selecting, and the outer UPDATE stamps
+ * `lockedAt` so already-claimed rows are excluded until released or stale.
+ */
+async function claimDueLeads(opts: {
+  teamId: string;
+  campaignId?: string;
+  limit: number;
+}): Promise<string[]> {
+  const { teamId, campaignId, limit } = opts;
+  const selector = campaignId
+    ? Prisma.sql`cl."campaignId" = ${campaignId}`
+    : Prisma.sql`cl."campaignId" IN (SELECT id FROM "Campaign" WHERE "teamId" = ${teamId} AND status = 'RUNNING')`;
+
+  const rows = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+    UPDATE "CampaignLead" AS target
+    SET "lockedAt" = now()
+    WHERE target.id IN (
+      SELECT cl.id FROM "CampaignLead" cl
+      WHERE ${selector}
+        AND cl.status IN ('PENDING', 'IN_PROGRESS')
+        AND (cl."nextRunAt" IS NULL OR cl."nextRunAt" <= now())
+        AND (cl."lockedAt" IS NULL OR cl."lockedAt" < now() - interval '${Prisma.raw(String(LOCK_TTL_MINUTES))} minutes')
+      ORDER BY cl."nextRunAt" ASC NULLS FIRST
+      FOR UPDATE SKIP LOCKED
+      LIMIT ${limit}
+    )
+    RETURNING target.id;
+  `);
+  return rows.map((r) => r.id);
+}
+
+async function releaseLead(id: string): Promise<void> {
+  await prisma.campaignLead
+    .update({ where: { id }, data: { lockedAt: null } })
+    .catch(() => {});
 }
 
 /**
  * Process all campaign leads that are due to run for a campaign (or all running
- * campaigns for a team). Loops each lead forward until it hits a delay,
- * condition wait, limit, or completion — bounded to avoid infinite loops.
+ * campaigns for a team). Each lead is claimed with a row lock first, so this is
+ * safe to run from multiple concurrent workers. Loops each lead forward until
+ * it hits a delay, condition wait, limit, or completion — bounded to avoid
+ * infinite loops — then releases the claim.
  */
 export async function runDueSteps(opts: {
   teamId: string;
@@ -317,43 +439,35 @@ export async function runDueSteps(opts: {
 }): Promise<{ processed: number; outcomes: StepOutcome[] }> {
   const { teamId, campaignId, maxPerLead = 20 } = opts;
 
-  const campaignFilter: Prisma.CampaignLeadWhereInput = campaignId
-    ? { campaignId }
-    : { campaign: { teamId, status: "RUNNING" } };
-
-  const due = await prisma.campaignLead.findMany({
-    where: {
-      ...campaignFilter,
-      status: { in: ["PENDING", "IN_PROGRESS"] },
-      OR: [{ nextRunAt: null }, { nextRunAt: { lte: new Date() } }],
-    },
-    select: { id: true },
-    take: 500,
-  });
+  const claimed = await claimDueLeads({ teamId, campaignId, limit: 500 });
 
   const outcomes: StepOutcome[] = [];
   let processed = 0;
 
-  for (const { id } of due) {
-    for (let i = 0; i < maxPerLead; i++) {
-      const outcome = await stepCampaignLead(id);
-      if (!outcome.processed) {
-        outcomes.push(outcome);
-        break;
+  for (const id of claimed) {
+    try {
+      for (let i = 0; i < maxPerLead; i++) {
+        const outcome = await stepCampaignLead(id);
+        if (!outcome.processed) {
+          outcomes.push(outcome);
+          break;
+        }
+        processed++;
+        // Stop looping this lead once it is parked on a future delay.
+        const refreshed = await prisma.campaignLead.findUnique({
+          where: { id },
+          select: { status: true, nextRunAt: true },
+        });
+        if (
+          !refreshed ||
+          refreshed.status !== "IN_PROGRESS" ||
+          (refreshed.nextRunAt && refreshed.nextRunAt.getTime() > Date.now())
+        ) {
+          break;
+        }
       }
-      processed++;
-      // Stop looping this lead once it is parked on a future delay.
-      const refreshed = await prisma.campaignLead.findUnique({
-        where: { id },
-        select: { status: true, nextRunAt: true },
-      });
-      if (
-        !refreshed ||
-        refreshed.status !== "IN_PROGRESS" ||
-        (refreshed.nextRunAt && refreshed.nextRunAt.getTime() > Date.now())
-      ) {
-        break;
-      }
+    } finally {
+      await releaseLead(id);
     }
   }
 

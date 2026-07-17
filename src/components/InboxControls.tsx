@@ -1,7 +1,21 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { replyInInbox, toggleConversationFlag } from "@/lib/actions";
+import { replyInInbox, toggleConversationFlag, simulateReplyAction } from "@/lib/actions";
+
+export function SimulateReplyButton({ leadId }: { leadId: string }) {
+  const [pending, start] = useTransition();
+  return (
+    <button
+      className="btn-ghost"
+      disabled={pending}
+      title="デモ用: リードからの返信を注入し、自動一時停止を発火します"
+      onClick={() => start(() => simulateReplyAction(leadId))}
+    >
+      {pending ? "…" : "返信をシミュレート"}
+    </button>
+  );
+}
 
 export function FlagButtons({
   conversationId,

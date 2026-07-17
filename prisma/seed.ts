@@ -1,16 +1,24 @@
 import { PrismaClient, type ActionType, type LeadSource } from "@prisma/client";
+import { hashPassword } from "../src/lib/auth/password";
 
 const prisma = new PrismaClient();
+
+const DEMO_PASSWORD = "password123";
 
 async function main() {
   console.log("Seeding…");
 
   // Clean slate (dev only)
+  await prisma.session.deleteMany();
+  await prisma.webhookJob.deleteMany();
+  await prisma.webhookDelivery.deleteMany();
   await prisma.message.deleteMany();
   await prisma.conversation.deleteMany();
   await prisma.activityLog.deleteMany();
   await prisma.campaignLead.deleteMany();
   await prisma.campaignDailyStat.deleteMany();
+  await prisma.messageVariant.deleteMany();
+  await prisma.messageTemplate.deleteMany();
   await prisma.sequenceNode.deleteMany();
   await prisma.campaign.deleteMany();
   await prisma.sequence.deleteMany();
@@ -28,12 +36,31 @@ async function main() {
     data: { name: "Zeeta 営業チーム", timezone: "Asia/Tokyo" },
   });
 
+  const passwordHash = await hashPassword(DEMO_PASSWORD);
+
   const owner = await prisma.user.create({
-    data: { email: "sakayama.taiji@zeeta.co.jp", name: "坂山 泰司" },
+    data: { email: "sakayama.taiji@zeeta.co.jp", name: "坂山 泰司", passwordHash },
   });
   await prisma.membership.create({
     data: { teamId: team.id, userId: owner.id, role: "OWNER" },
   });
+
+  // A second member for the sales team (demonstrates multi-member operation).
+  const member = await prisma.user.create({
+    data: { email: "member@zeeta.co.jp", name: "佐藤 花子", passwordHash },
+  });
+  await prisma.membership.create({
+    data: { teamId: team.id, userId: member.id, role: "MEMBER" },
+  });
+
+  // A second team the owner also belongs to (demonstrates team switching + tenant isolation).
+  const recruitingTeam = await prisma.team.create({
+    data: { name: "Zeeta 採用チーム", timezone: "Asia/Tokyo" },
+  });
+  await prisma.membership.create({
+    data: { teamId: recruitingTeam.id, userId: owner.id, role: "OWNER" },
+  });
+  await prisma.dailyLimit.create({ data: { teamId: recruitingTeam.id } });
 
   await prisma.dailyLimit.create({
     data: {
@@ -157,9 +184,10 @@ async function main() {
     },
   ];
 
+  let firstMessageNodeId: string | null = null;
   for (let i = 0; i < nodeDefs.length; i++) {
     const d = nodeDefs[i];
-    await prisma.sequenceNode.create({
+    const node = await prisma.sequenceNode.create({
       data: {
         sequenceId: sequence.id,
         kind: d.kind,
@@ -171,7 +199,53 @@ async function main() {
         conditionType: d.conditionType ?? null,
       },
     });
+    if (d.kind === "ACTION" && d.actionType === "MESSAGE" && !firstMessageNodeId) {
+      firstMessageNodeId = node.id;
+    }
   }
+
+  // A/B test on the first outreach message (two subject/tone variants).
+  if (firstMessageNodeId) {
+    await prisma.messageVariant.createMany({
+      data: [
+        {
+          nodeId: firstMessageNodeId,
+          label: "A",
+          body: "{{firstName}} さん、接続ありがとうございます！{{company}} での {{jobTitle}} のお取り組みに関心があり連絡しました。少しお話しできればと思います。",
+        },
+        {
+          nodeId: firstMessageNodeId,
+          label: "B",
+          body: "{{firstName}} さん、はじめまして。{{company}} の {{jobTitle}} として注力されている領域について、ぜひ一度意見交換させていただけませんか？",
+        },
+      ],
+    });
+  }
+
+  // Message templates library
+  await prisma.messageTemplate.createMany({
+    data: [
+      {
+        teamId: team.id,
+        name: "初回接続メッセージ",
+        category: "message",
+        body: "{{firstName}} さん、接続ありがとうございます！{{company}} でのお取り組みに関心があります。",
+      },
+      {
+        teamId: team.id,
+        name: "フォローアップ",
+        category: "message",
+        body: "{{firstName}} さん、先日のメッセージのフォローアップです。ご都合いかがでしょうか？",
+      },
+      {
+        teamId: team.id,
+        name: "採用スカウト InMail",
+        category: "inmail",
+        subject: "{{company}} でのご活躍について",
+        body: "{{firstName}} さん、{{jobTitle}} としてのご経験に大変興味を持ちご連絡しました。",
+      },
+    ],
+  });
 
   // Template sequence
   await prisma.sequence.create({
@@ -222,12 +296,14 @@ async function main() {
       teamId: team.id,
       url: "https://hooks.example.com/linkedin",
       events: ["connection.accepted", "message.replied"],
+      secret: "whsec_demo000000000000000000000000000000000000",
     },
   });
 
   console.log(
-    `Seeded: team=${team.name}, leads=${leads.length}, sequence nodes=${nodeDefs.length}, campaign=${campaign.name}`,
+    `Seeded: teams=[${team.name}, ${recruitingTeam.name}], leads=${leads.length}, sequence nodes=${nodeDefs.length}, campaign=${campaign.name}`,
   );
+  console.log(`Demo login: ${owner.email} / ${DEMO_PASSWORD}  (also ${member.email})`);
 }
 
 main()
